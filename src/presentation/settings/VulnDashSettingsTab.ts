@@ -206,6 +206,26 @@ export class VulnDashSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName('Default dashboard date range')
+      .setDesc('Controls the initial modified-date window used when the dashboard opens.')
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOptions({
+            past_day: 'Past Day',
+            past_3_days: 'Past 3 Days',
+            past_7_days: 'Past 7 Days',
+            custom: 'Custom Range'
+          })
+          .setValue(settings.defaultDashboardDateRangePreset)
+          .onChange(async (value) => {
+            await this.plugin.updateSettings({
+              ...this.plugin.getSettings(),
+              defaultDashboardDateRangePreset: value as VulnDashSettings['defaultDashboardDateRangePreset']
+            });
+          });
+      });
+
+    new Setting(containerEl)
       .setName('Color-coded severity')
       .setDesc('Applies severity CSS classes (for CRITICAL/HIGH rows).')
       .addToggle((toggle) => toggle.setValue(settings.colorCodedSeverity).onChange(async (value) => {

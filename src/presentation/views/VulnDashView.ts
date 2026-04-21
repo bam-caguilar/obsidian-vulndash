@@ -5,13 +5,13 @@ import { FilterByAffectedProject, type AffectedProjectFilter } from '../../appli
 import {
   DEFAULT_DASHBOARD_DATE_RANGE,
   cloneDashboardDateRangeSelection,
-  filterVulnerabilitiesByPublishedDateWindow,
+  filterVulnerabilitiesByModifiedDateWindow,
   resolveDashboardDateRangeSelection,
   type DashboardDateRangeSelection
-} from '../../application/dashboard/PublishedDateWindow';
+} from '../../application/dashboard/ModifiedDateWindow';
 import type { ComponentInventoryWorkspaceSnapshot } from '../../application/sbom/types';
 import type { TriageFilterMode } from '../../application/triage/FilterByTriageState';
-import type { DashboardSortOrder, VulnDashSettings } from '../../application/use-cases/types';
+import type { DashboardDateRangePreset, DashboardSortOrder, VulnDashSettings } from '../../application/use-cases/types';
 import { RelationshipNormalizer } from '../../application/sbom/RelationshipNormalizer';
 import {
   EMPTY_AFFECTED_PROJECT_RESOLUTION,
@@ -69,6 +69,7 @@ export class VulnDashView extends ItemView {
   private customDateFromInputEl: HTMLInputElement | null = null;
   private customDateToInputEl: HTMLInputElement | null = null;
   private customDateRangeEl: HTMLDivElement | null = null;
+  private defaultDashboardDateRangePreset: DashboardDateRangePreset = DEFAULT_DASHBOARD_DATE_RANGE.preset;
   private dateRangeSelectEl: HTMLSelectElement | null = null;
   private dateRangeValidationEl: HTMLDivElement | null = null;
   private dateRangeSelection = cloneDashboardDateRangeSelection(DEFAULT_DASHBOARD_DATE_RANGE);
@@ -125,6 +126,7 @@ export class VulnDashView extends ItemView {
       disableComponent: (componentKey: string) => Promise<void>;
       enableComponent: (componentKey: string) => Promise<void>;
       followComponent: (componentKey: string) => Promise<void>;
+      getDefaultDashboardDateRangePreset: () => DashboardDateRangePreset;
       getTriageFilter: () => TriageFilterMode;
       getNow?: () => Date;
       loadComponentInventory: () => Promise<ComponentInventoryWorkspaceSnapshot>;
@@ -138,6 +140,10 @@ export class VulnDashView extends ItemView {
     super(leaf);
     this.componentDetailsRenderer = new ComponentDetailsRenderer(this.app, '');
     this.addChild(this.componentDetailsRenderer);
+    const initialDateRangePreset = callbacks.getDefaultDashboardDateRangePreset();
+    this.defaultDashboardDateRangePreset = initialDateRangePreset;
+    this.dateRangeSelection = cloneDashboardDateRangeSelection({ preset: initialDateRangePreset });
+    this.appliedDateRangeSelection = cloneDashboardDateRangeSelection({ preset: initialDateRangePreset });
     this.getTriageFilter = callbacks.getTriageFilter;
     this.getNow = callbacks.getNow ?? (() => new Date());
     this.loadComponentInventory = callbacks.loadComponentInventory;
@@ -225,6 +231,18 @@ export class VulnDashView extends ItemView {
   }
 
   public setSettings(settings: VulnDashSettings): void {
+    const defaultSelection = { preset: settings.defaultDashboardDateRangePreset };
+    const isUsingInitialDefaultSelection = this.dateRangeSelection.preset === this.defaultDashboardDateRangePreset
+      && this.appliedDateRangeSelection.preset === this.defaultDashboardDateRangePreset
+      && !this.dateRangeSelection.customFrom
+      && !this.dateRangeSelection.customTo
+      && !this.appliedDateRangeSelection.customFrom
+      && !this.appliedDateRangeSelection.customTo;
+    if (isUsingInitialDefaultSelection) {
+      this.dateRangeSelection = cloneDashboardDateRangeSelection(defaultSelection);
+      this.appliedDateRangeSelection = cloneDashboardDateRangeSelection(defaultSelection);
+    }
+    this.defaultDashboardDateRangePreset = settings.defaultDashboardDateRangePreset;
     this.sortKey = this.getDefaultSort(settings.defaultSortOrder);
     this.sortDesc = true;
     this.maxResults = settings.maxResults;
@@ -234,6 +252,7 @@ export class VulnDashView extends ItemView {
     this.componentWorkspaceDirty = true;
     this.componentWorkspaceSnapshot = null;
     this.componentInventoryView.invalidate();
+    this.syncDateRangeControls();
 
     if (this.activeTab === 'vulnerabilities') {
       void this.refreshVulnerabilityTable(EMPTY_CHANGE_HINTS, {
@@ -361,7 +380,7 @@ export class VulnDashView extends ItemView {
     if (vulnerabilities.length === 0) {
       const hasInteractiveFilters = Boolean(this.localSearchQuery)
         || this.affectedProjectFilterValue !== ALL_AFFECTED_PROJECT_FILTER_VALUE
-        || this.appliedDateRangeSelection.preset !== DEFAULT_DASHBOARD_DATE_RANGE.preset;
+        || this.appliedDateRangeSelection.preset !== this.defaultDashboardDateRangePreset;
       return {
         columns,
         emptyState: {
@@ -403,7 +422,7 @@ export class VulnDashView extends ItemView {
     let data = this.getSorted();
     const dateRangeResolution = resolveDashboardDateRangeSelection(this.appliedDateRangeSelection, this.getNow());
     if (dateRangeResolution.window) {
-      data = filterVulnerabilitiesByPublishedDateWindow(data, dateRangeResolution.window);
+      data = filterVulnerabilitiesByModifiedDateWindow(data, dateRangeResolution.window);
     }
     data = this.affectedProjectFilter.execute(
       data,

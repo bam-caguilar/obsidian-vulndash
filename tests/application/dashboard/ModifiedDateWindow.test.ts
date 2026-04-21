@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   DEFAULT_DASHBOARD_DATE_RANGE,
-  filterVulnerabilitiesByPublishedDateWindow,
+  filterVulnerabilitiesByModifiedDateWindow,
   resolveDashboardDateRangeSelection
-} from '../../../src/application/dashboard/PublishedDateWindow';
+} from '../../../src/application/dashboard/ModifiedDateWindow';
 import type { Vulnerability } from '../../../src/domain/entities/Vulnerability';
 
 const createVulnerability = (id: string, publishedAt: string): Vulnerability => ({
@@ -60,14 +60,14 @@ test('custom dashboard date range validates required dates and ordering', () => 
   assert.equal(reversed.validationMessage, 'From date must be on or before the To date.');
 });
 
-test('published date window filter keeps only findings inside the inclusive window', () => {
+test('modified date window filter keeps only findings inside the inclusive window', () => {
   const vulnerabilities = [
     createVulnerability('CVE-1', '2026-04-20T00:00:00.000Z'),
     createVulnerability('CVE-2', '2026-04-21T10:30:00.000Z'),
     createVulnerability('CVE-3', '2026-04-22T00:00:00.000Z')
   ];
 
-  const filtered = filterVulnerabilitiesByPublishedDateWindow(vulnerabilities, {
+  const filtered = filterVulnerabilitiesByModifiedDateWindow(vulnerabilities, {
     from: '2026-04-20T00:00:00.000Z',
     to: '2026-04-21T23:59:59.999Z'
   });

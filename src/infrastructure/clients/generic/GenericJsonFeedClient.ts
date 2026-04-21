@@ -1,6 +1,6 @@
 import type { IHttpClient } from '../../../application/ports/HttpClient';
 import type { FetchVulnerabilityOptions, FetchVulnerabilityResult, VulnerabilityFeed } from '../../../application/ports/VulnerabilityFeed';
-import { filterVulnerabilitiesByPublishedDateWindow } from '../../../application/dashboard/PublishedDateWindow';
+import { filterVulnerabilitiesByModifiedDateWindow } from '../../../application/dashboard/ModifiedDateWindow';
 import type { Vulnerability } from '../../../domain/entities/Vulnerability';
 import { classifySeverity } from '../../../domain/value-objects/CvssScore';
 import { sanitizeMarkdown, sanitizeText, sanitizeUrl } from '../../security/sanitize';
@@ -66,10 +66,10 @@ export class GenericJsonFeedClient extends ClientBase implements VulnerabilityFe
     const vulnerabilities = records
       .slice(0, this.controls.maxItems)
       .map((record) => this.normalize(record));
-    const filteredVulnerabilities = options.publishedFrom || options.publishedUntil
-      ? filterVulnerabilitiesByPublishedDateWindow(vulnerabilities, {
-        from: options.publishedFrom ?? new Date(0).toISOString(),
-        to: options.publishedUntil ?? new Date(8640000000000000).toISOString()
+    const filteredVulnerabilities = options.modifiedFrom || options.modifiedUntil
+      ? filterVulnerabilitiesByModifiedDateWindow(vulnerabilities, {
+        from: options.modifiedFrom ?? new Date(0).toISOString(),
+        to: options.modifiedUntil ?? new Date(8640000000000000).toISOString()
       })
       : vulnerabilities;
 

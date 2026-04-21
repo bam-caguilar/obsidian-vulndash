@@ -45,20 +45,20 @@ export function validateDateRange(
   };
 }
 
-export function validatePublishedDateRange(
-  publishedFrom: string | undefined,
-  publishedUntil: string | undefined
+export function validateModifiedDateRange(
+  modifiedFrom: string | undefined,
+  modifiedUntil: string | undefined
 ): NvdDateRange {
-  const safePublishedFrom = publishedFrom ? validateIsoUtcDate(publishedFrom, 'pubStartDate') : undefined;
-  const safePublishedUntil = publishedUntil ? validateIsoUtcDate(publishedUntil, 'pubEndDate') : undefined;
+  const safeModifiedFrom = modifiedFrom ? validateIsoUtcDate(modifiedFrom, 'lastModStartDate') : undefined;
+  const safeModifiedUntil = modifiedUntil ? validateIsoUtcDate(modifiedUntil, 'lastModEndDate') : undefined;
 
-  if (safePublishedFrom && safePublishedUntil && Date.parse(safePublishedFrom) > Date.parse(safePublishedUntil)) {
-    throw new Error('pubStartDate must be less than or equal to pubEndDate.');
+  if (safeModifiedFrom && safeModifiedUntil && Date.parse(safeModifiedFrom) > Date.parse(safeModifiedUntil)) {
+    throw new Error('lastModStartDate must be less than or equal to lastModEndDate.');
   }
 
   return {
-    ...(safePublishedFrom ? { publishedFrom: safePublishedFrom } : {}),
-    ...(safePublishedUntil ? { publishedUntil: safePublishedUntil } : {})
+    ...(safeModifiedFrom ? { modifiedFrom: safeModifiedFrom } : {}),
+    ...(safeModifiedUntil ? { modifiedUntil: safeModifiedUntil } : {})
   };
 }
 

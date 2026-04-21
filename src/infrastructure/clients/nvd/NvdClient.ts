@@ -1,4 +1,5 @@
 import { AuthFailureHttpError, ClientHttpError } from '../../../application/ports/DataSourceError';
+import { filterVulnerabilitiesByModifiedDateWindow } from '../../../application/dashboard/ModifiedDateWindow';
 import type { HttpResponse, IHttpClient } from '../../../application/ports/HttpClient';
 import type { FetchVulnerabilityOptions, FetchVulnerabilityResult, VulnerabilityFeed } from '../../../application/ports/VulnerabilityFeed';
 import type { Vulnerability } from '../../../domain/entities/Vulnerability';
@@ -54,6 +55,8 @@ export class NvdClient extends ClientBase implements VulnerabilityFeed {
         startIndex,
         ...(options.since ? { since: options.since } : {}),
         ...(options.until ? { until: options.until } : {}),
+        ...(options.modifiedFrom ? { modifiedFrom: options.modifiedFrom } : {}),
+        ...(options.modifiedUntil ? { modifiedUntil: options.modifiedUntil } : {}),
         signal: options.signal,
         operationName: 'fetchVulnerabilities'
       });
@@ -65,8 +68,14 @@ export class NvdClient extends ClientBase implements VulnerabilityFeed {
         .map((item) => item.cve)
         .filter((cve): cve is NonNullable<typeof cve> => Boolean(cve?.id))
         .map((cve) => this.mapper.normalize(cve));
+      const filteredItems = options.modifiedFrom || options.modifiedUntil
+        ? filterVulnerabilitiesByModifiedDateWindow(items, {
+          from: options.modifiedFrom ?? new Date(0).toISOString(),
+          to: options.modifiedUntil ?? new Date(8640000000000000).toISOString()
+        })
+        : items;
 
-      for (const item of items) {
+      for (const item of filteredItems) {
         if (collected.length >= this.controls.maxItems) {
           warnings.push('max_items_reached');
           break;
@@ -112,15 +121,19 @@ export class NvdClient extends ClientBase implements VulnerabilityFeed {
       startIndex: number;
       since?: string;
       until?: string;
+      modifiedFrom?: string;
+      modifiedUntil?: string;
       signal: AbortSignal;
       operationName: string;
     }
   ): Promise<{ response: HttpResponse<NvdResponse>; retriesPerformed: number }> {
-    const request = this.requestBuilder.buildFetchRequest(
-      options.since,
-      options.until,
-      options.startIndex
-    );
+    const request = this.requestBuilder.buildFetchRequest({
+      startIndex: options.startIndex,
+      ...(options.since ? { since: options.since } : {}),
+      ...(options.until ? { until: options.until } : {}),
+      ...(options.modifiedFrom ? { modifiedFrom: options.modifiedFrom } : {}),
+      ...(options.modifiedUntil ? { modifiedUntil: options.modifiedUntil } : {})
+    });
     return this.executeRequest(request, options.signal, options.operationName);
   }
 

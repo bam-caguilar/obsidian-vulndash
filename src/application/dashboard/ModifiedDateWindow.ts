@@ -1,9 +1,8 @@
 import type { Vulnerability } from '../../domain/entities/Vulnerability';
+import type { DashboardDateRangePreset } from '../use-cases/types';
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const CALENDAR_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-
-export type DashboardDateRangePreset = 'past_day' | 'past_3_days' | 'past_7_days' | 'custom';
 
 export interface DashboardDateRangeSelection {
   readonly preset: DashboardDateRangePreset;
@@ -11,7 +10,7 @@ export interface DashboardDateRangeSelection {
   readonly customTo?: string;
 }
 
-export interface ResolvedPublishedDateWindow {
+export interface ResolvedModifiedDateWindow {
   readonly from: string;
   readonly to: string;
 }
@@ -19,7 +18,7 @@ export interface ResolvedPublishedDateWindow {
 export interface DashboardDateRangeResolution {
   readonly isValid: boolean;
   readonly validationMessage?: string;
-  readonly window?: ResolvedPublishedDateWindow;
+  readonly window?: ResolvedModifiedDateWindow;
 }
 
 export const DEFAULT_DASHBOARD_DATE_RANGE: DashboardDateRangeSelection = {
@@ -28,7 +27,7 @@ export const DEFAULT_DASHBOARD_DATE_RANGE: DashboardDateRangeSelection = {
 
 const buildValidationResult = (
   isValid: boolean,
-  window?: ResolvedPublishedDateWindow,
+  window?: ResolvedModifiedDateWindow,
   validationMessage?: string
 ): DashboardDateRangeResolution => ({
   isValid,
@@ -67,7 +66,7 @@ const toLocalDayBoundary = (value: string, boundary: 'start' | 'end'): Date | nu
 const createPresetWindow = (
   now: Date,
   lookbackMs: number
-): ResolvedPublishedDateWindow => ({
+): ResolvedModifiedDateWindow => ({
   from: new Date(now.getTime() - lookbackMs).toISOString(),
   to: now.toISOString()
 });
@@ -117,9 +116,9 @@ export const resolveDashboardDateRangeSelection = (
   }
 };
 
-export const filterVulnerabilitiesByPublishedDateWindow = (
+export const filterVulnerabilitiesByModifiedDateWindow = (
   vulnerabilities: readonly Vulnerability[],
-  window: ResolvedPublishedDateWindow
+  window: ResolvedModifiedDateWindow
 ): Vulnerability[] => {
   const fromMs = Date.parse(window.from);
   const toMs = Date.parse(window.to);
@@ -128,7 +127,7 @@ export const filterVulnerabilitiesByPublishedDateWindow = (
   }
 
   return vulnerabilities.filter((vulnerability) => {
-    const publishedAtMs = Date.parse(vulnerability.publishedAt);
-    return !Number.isNaN(publishedAtMs) && publishedAtMs >= fromMs && publishedAtMs <= toMs;
+    const updatedAtMs = Date.parse(vulnerability.updatedAt);
+    return !Number.isNaN(updatedAtMs) && updatedAtMs >= fromMs && updatedAtMs <= toMs;
   });
 };
