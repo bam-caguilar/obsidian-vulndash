@@ -144,6 +144,23 @@ export interface ComponentRelationshipGraph {
   vulnerabilitiesByComponent: Map<string, RelatedVulnerabilitySummary[]>;
 }
 
+export interface ComponentPurlQueryVulnerabilitySummary {
+  id: string;
+  severity: string;
+  source: string;
+  title: string;
+}
+
+export interface ComponentPurlQueryMatchSummary {
+  cachedVulnerabilityCount: number;
+  componentKey: string;
+  componentName: string;
+  correlatedPurlMatchCount: number;
+  purl: string;
+  queryState: 'error' | 'hit' | 'miss' | 'unqueried';
+  vulnerabilities: ComponentPurlQueryVulnerabilitySummary[];
+}
+
 export interface ComponentInventoryWorkspaceSnapshot {
   inventory: ComponentInventorySnapshot;
   purlMatches: readonly ComponentPurlMatchSummary[];
