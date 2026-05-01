@@ -30,11 +30,24 @@ export interface SbomLoadSuccessResult {
 export interface SbomLoadFailureResult {
   cachedState: RuntimeSbomState | null;
   error: string;
+  reason: 'failed';
   sbomId: string;
   success: false;
 }
 
-export type SbomLoadResult = SbomLoadSuccessResult | SbomLoadFailureResult;
+export interface SbomLoadSupersededResult {
+  reason: 'superseded';
+  sbomId: string;
+  success: false;
+}
+
+export type SbomLoadResult = SbomLoadFailureResult | SbomLoadSuccessResult | SbomLoadSupersededResult;
+
+export const isSbomLoadFailureResult = (result: SbomLoadResult): result is SbomLoadFailureResult =>
+  !result.success && result.reason === 'failed';
+
+export const isSbomLoadSupersededResult = (result: SbomLoadResult): result is SbomLoadSupersededResult =>
+  !result.success && result.reason === 'superseded';
 
 export interface SbomFileChangeStatus {
   currentHash: string | null;
@@ -118,6 +131,7 @@ export class SbomImportService {
       return {
         cachedState: cached,
         error: 'SBOM path is required.',
+        reason: 'failed',
         sbomId: config.id,
         success: false
       };
@@ -173,6 +187,7 @@ export class SbomImportService {
       return {
         cachedState: cached,
         error: this.getErrorMessage(error),
+        reason: 'failed',
         sbomId: config.id,
         success: false
       };
@@ -328,8 +343,7 @@ export class SbomImportService {
     }
 
     return {
-      cachedState: null,
-      error: 'A newer SBOM load completed first.',
+      reason: 'superseded',
       sbomId,
       success: false
     };

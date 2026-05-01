@@ -20,6 +20,8 @@ import type { ChangedVulnerabilityIds } from '../../application/pipeline/Pipelin
 import { buildVulnerabilityCacheKey, createEmptyChangedVulnerabilityIds } from '../../application/pipeline/PipelineTypes';
 import type { SbomComparisonResult } from '../../application/use-cases/SbomComparisonService';
 import {
+  isSbomLoadFailureResult,
+  isSbomLoadSupersededResult,
   type SbomFileChangeStatus,
   type SbomLoadResult,
   type SbomValidationResult
@@ -335,8 +337,15 @@ export default class VulnDashPlugin extends Plugin {
 
     await this.applySettings(nextSettings, { recomputeFilters: sbom.enabled });
 
-    if (!result.success) {
+    if (isSbomLoadFailureResult(result)) {
       return { message: result.error, success: false };
+    }
+
+    if (isSbomLoadSupersededResult(result)) {
+      return {
+        message: `Skipped ${sbom.label} because a newer SBOM load replaced it.`,
+        success: true
+      };
     }
 
     return {
@@ -355,9 +364,9 @@ export default class VulnDashPlugin extends Plugin {
     let failed = 0;
 
     for (const result of resultMap.values()) {
-      if (result.success) {
+      if (result.success || isSbomLoadSupersededResult(result)) {
         succeeded += 1;
-      } else {
+      } else if (isSbomLoadFailureResult(result)) {
         failed += 1;
       }
     }
@@ -513,7 +522,7 @@ export default class VulnDashPlugin extends Plugin {
       return result.state;
     }
 
-    return result.cachedState;
+    return isSbomLoadFailureResult(result) ? result.cachedState : null;
   }
 
   private collectCatalogDocuments(results: readonly SbomLoadResult[]): RuntimeSbomState['document'][] {
@@ -522,7 +531,7 @@ export default class VulnDashPlugin extends Plugin {
         return [result.state.document];
       }
 
-      return result.cachedState ? [result.cachedState.document] : [];
+      return isSbomLoadFailureResult(result) && result.cachedState ? [result.cachedState.document] : [];
     });
   }
 
@@ -530,7 +539,11 @@ export default class VulnDashPlugin extends Plugin {
     const sbomIdsBySourcePath = new Map<string, Set<string>>();
 
     for (const result of results) {
-      const state = result.success ? result.state : result.cachedState;
+      const state = result.success
+        ? result.state
+        : isSbomLoadFailureResult(result)
+          ? result.cachedState
+          : null;
       if (!state) {
         continue;
       }
@@ -605,10 +618,19 @@ export default class VulnDashPlugin extends Plugin {
       return normalizeImportedSbomConfig(sbom, index);
     }
 
-    if (!result.success) {
+    if (isSbomLoadFailureResult(result)) {
       return normalizeImportedSbomConfig({
         ...sbom,
         lastError: result.error
+      }, index);
+    }
+
+    if (isSbomLoadSupersededResult(result)) {
+      return normalizeImportedSbomConfig({
+        ...sbom,
+        ...(sbom.lastError !== undefined
+          ? { lastError: sbom.lastError === 'A newer SBOM load completed first.' ? '' : sbom.lastError }
+          : {})
       }, index);
     }
 

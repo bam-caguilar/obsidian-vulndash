@@ -1,4 +1,4 @@
-import type { SbomLoadResult } from '../use-cases/SbomImportService';
+import { isSbomLoadFailureResult, type SbomLoadResult } from '../use-cases/SbomImportService';
 import type { VulnDashSettings } from '../use-cases/types';
 import { ComponentPreferenceService } from './ComponentPreferenceService';
 import { SbomCatalogService } from './SbomCatalogService';
@@ -42,7 +42,7 @@ export class ComponentInventoryService {
       enabledSbomCount: settings.sboms.filter((sbom) => sbom.enabled).length,
       failedSbomCount: issues.length,
       issues,
-      parsedSbomCount: loadResults.filter((result) => result.success || result.cachedState).length
+      parsedSbomCount: loadResults.filter((result) => result.success || (isSbomLoadFailureResult(result) && result.cachedState)).length
     };
   }
 
@@ -52,7 +52,7 @@ export class ComponentInventoryService {
         return [result.state.document];
       }
 
-      return result.cachedState ? [result.cachedState.document] : [];
+      return isSbomLoadFailureResult(result) && result.cachedState ? [result.cachedState.document] : [];
     });
   }
 
@@ -63,7 +63,7 @@ export class ComponentInventoryService {
     const settingsById = new Map(settings.sboms.map((sbom) => [sbom.id, sbom] as const));
 
     return results.flatMap((result) => {
-      if (result.success) {
+      if (result.success || !isSbomLoadFailureResult(result)) {
         return [];
       }
 
