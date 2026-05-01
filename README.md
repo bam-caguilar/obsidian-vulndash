@@ -1,22 +1,23 @@
 # VulnDash
 
-VulnDash is a near-live vulnerability and Common Vulnerabilities and Exposures (CVE) dashboard integrated directly into your Obsidian vault. It aggregates security advisories from multiple sources, caches them locally via a robust background ingestion pipeline, and seamlessly correlates them against your specific software stack using offline matching.
+VulnDash is a near-live vulnerability and Common Vulnerabilities and Exposures (CVE) dashboard integrated directly into your Obsidian vault. It aggregates security advisories from multiple sources, caches them locally via a robust background ingestion pipeline, and seamlessly correlates them against your specific software stack using offline matching. 
 
 ## Features
 
-* **Offline-First Vulnerability Correlation**: Avoids API rate limits and slow load times by continuously syncing feeds (NVD, GitHub Advisories, custom JSON) into a local vault cache. SBOM components are instantly matched against this local database using PURL and CPE identifiers.
-* **Comprehensive SBOM Workspace**: Import your Software Bill of Materials (SBOM) JSON files. VulnDash officially supports both **CycloneDX** and **SPDX** formats. The plugin automatically parses components, tracks your inventory, and reveals exactly which packages in your stack are vulnerable.
-* **Smart Alerting & Notifications**: Stay informed without leaving your workflow. VulnDash can trigger native Obsidian notices or OS-level desktop notifications when new threats match your environment. 
-* **Advanced Triage Workflows**: Manage your security posture directly in Obsidian. Mark findings with distinct triage states (`Active`, `Investigating`, `Mitigated`, `Accepted Risk`, `False Positive`, or `Suppressed`) to track your mitigation progress over time.
-* **Obsidian Native Integration**: Generate automated Daily Rollup notes of your current threat landscape. VulnDash can also auto-link components to your existing Project notes and create dedicated vulnerability notes for critical threats to document mitigation strategies.
-* **Unified & Filterable Dashboard**: View a sortable, virtualized table of vulnerabilities. Filter out the noise by setting minimum CVSS scores, severity levels, specific triage states, or using keyword matching.
+* **Offline-First Vulnerability Correlation**: Avoid API rate limits and slow load times by continuously syncing feeds (NVD, GitHub Advisories, OSV, and custom JSON) into a local vault cache. SBOM components are instantly matched against this local database using PURL and CPE identifiers.
+* **Comprehensive SBOM Workspace & Diffing**: Import your Software Bill of Materials (SBOM) JSON files. VulnDash natively supports both **CycloneDX** and **SPDX** formats. Automatically parse components, track your inventory, and compare different versions of your SBOMs to spot newly introduced dependencies or resolved vulnerabilities.
+* **Interactive Dependency Graph**: Visualize component relationships and hierarchical dependencies directly within Obsidian using a native graph view. This makes it easier to track the blast radius of a compromised or vulnerable package across your entire stack.
+* **Smart Alerting & Notifications**: Stay informed without leaving your workflow. VulnDash triggers native Obsidian notices or OS-level desktop notifications when new threats match your environment based on custom severity thresholds.
+* **Advanced Triage Workflows**: Manage your security posture entirely offline. Mark findings with distinct triage states (`Active`, `Investigating`, `Mitigated`, `Accepted Risk`, `False Positive`, or `Suppressed`) and retain a historical record of your mitigation progress.
+* **Obsidian Native Integration**: Generate automated Daily Rollup notes of your current threat landscape. VulnDash can also auto-link components to your existing Project notes and create dedicated vulnerability notes for critical threats to document incident response strategies.
+* **High-Performance Architecture**: Built from the ground up for massive vaults. VulnDash offloads heavy parsing and ingestion logic to background Web Workers and utilizes highly optimized, virtualized tables to ensure Obsidian stays fast and responsive.
 * **Local & Secure**: API keys are encrypted using the Web Crypto API before being stored locally on your device. They are never logged or exposed in plain text.
 
 ## Installation
 
 ### Community Plugins (Recommended)
 Once approved and merged, you will be able to install VulnDash directly from the Obsidian Community Plugins directory.
-1. Open Obsidian **Settings -> Community Plugins**.
+1. Open Obsidian **Settings > Community Plugins**.
 2. Disable "Safe Mode" if it is active.
 3. Click "Browse" and search for "VulnDash".
 4. Click "Install" and then "Enable".
@@ -25,14 +26,14 @@ Once approved and merged, you will be able to install VulnDash directly from the
 1. Download the latest release from the GitHub repository.
 2. Extract the contents into your vault's `.obsidian/plugins/vulndash` directory.
 3. Ensure the folder contains `main.js`, `manifest.json`, and `styles.css`.
-4. Reload Obsidian and enable the plugin in **Settings -> Community Plugins**.
+4. Reload Obsidian and enable the plugin in **Settings > Community Plugins**.
 
 ## Configuration
 
-To ensure seamless offline correlation, it is highly recommended to configure your API keys to support the background sync pipeline.
+To ensure seamless offline correlation, configure your API keys to support the background sync pipeline.
 
 1. Go to **Settings > VulnDash**.
-2. Under **Integration & Feeds**, provide your **NVD API key** and a fine-grained **GitHub token**. 
+2. Under **Integration & Feeds**, configure your **NVD API key**, a fine-grained **GitHub token**, and toggle the **OSV (Open Source Vulnerabilities)** feed integration.
 3. Adjust your **Background Sync Interval** and **Overlap Window**. The internal ingestion pipeline will fetch incremental updates to keep your local vulnerability cache fresh without hitting rate limits.
 4. Under **Alerts & Notifications**, toggle your preference for in-app Obsidian notices versus OS-level desktop notifications, and set your minimum severity threshold for alerts.
 
@@ -41,19 +42,18 @@ To make VulnDash fully aware of your environment, configure it to watch your sof
 1. Place a valid CycloneDX or SPDX SBOM `.json` file anywhere in your Obsidian vault.
 2. Go to **Settings > VulnDash** and click **Manage SBOMs** under the SBOM Workspace section.
 3. Click **Add SBOM** and use the fuzzy search to select your JSON file.
-4. VulnDash will parse the components, extract PURLs and CPEs, and instantly run an offline correlation against your synced vulnerabilities to highlight active risks in your projects.
+4. VulnDash will parse the components in the background, extract PURLs and CPEs, and instantly run an offline correlation against your synced vulnerabilities to highlight active risks in your projects.
 
 ## Usage
 
-Once enabled and configured, you can open the dashboard in two ways:
-* Click the ribbon icon in the Obsidian left-hand sidebar.
-* Open the Command Palette (`Ctrl/Cmd + P`) and run the command: `VulnDash: Open vulnerability dashboard`.
+Once enabled and configured, you can open the dashboard and access features via the UI or Command Palette (`Ctrl/Cmd + P`):
 
-Inside the dashboard:
-* **Sorting & Searching**: Click any column header to sort. Use the global search bar or the dedicated component/triage filters to quickly locate specific findings.
+* **Open Dashboard**: Run `VulnDash: Open vulnerability dashboard` or click the ribbon icon in the left-hand sidebar.
+* **Sorting & Searching**: Click any column header in the virtualized table to sort. Use the global search bar or the dedicated component/triage filters to quickly locate specific findings.
 * **Triage & Review**: Select a vulnerability or component to update its triage state. Mark items as `Mitigated` once patched or `Accepted Risk` if no fix is currently viable.
 * **Expanding Details**: Click on any vulnerability or component row to expand the detailed view. This reveals a markdown-rendered summary, affected project links, and external references to the original advisories.
-* **Daily Rollups**: Use the Command Palette to generate a Daily Rollup note, which provides a snapshot summary of new findings and your current component inventory status.
+* **SBOM Comparison**: Launch the SBOM compare modal to evaluate differences between two SBOM iterations.
+* **Daily Rollups**: Use the Command Palette to trigger a Daily Rollup note, providing a snapshot summary of new findings and your current component inventory status natively as Markdown.
 
 ## Development
 
