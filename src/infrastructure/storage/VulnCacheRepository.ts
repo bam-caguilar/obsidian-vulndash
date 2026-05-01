@@ -307,6 +307,33 @@ export class VulnCacheRepository implements IOsvQueryCache {
     return vulnerabilities;
   }
 
+  public async loadPersistedVulnerabilitiesByCacheKeys(
+    keys: readonly string[]
+  ): Promise<Map<string, PersistedVulnerabilityRecord>> {
+    const uniqueKeys = this.toOrderedUniqueStrings(keys);
+    if (uniqueKeys.length === 0) {
+      return new Map<string, PersistedVulnerabilityRecord>();
+    }
+
+    const db = await this.database.open();
+    const transaction = db.transaction(VULN_CACHE_STORES.vulnerabilities, 'readonly');
+    const store = transaction.objectStore(VULN_CACHE_STORES.vulnerabilities);
+    const records = await Promise.all(uniqueKeys.map(async (key) => {
+      const record = await this.awaitRequest(store.get(key)) as PersistedVulnerabilityRecord | undefined;
+      return [key, record] as const;
+    }));
+    await awaitTransaction(transaction);
+
+    const result = new Map<string, PersistedVulnerabilityRecord>();
+    for (const [key, record] of records) {
+      if (record) {
+        result.set(key, record);
+      }
+    }
+
+    return result;
+  }
+
   private async awaitRequest<T>(request: IDBRequest<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       request.addEventListener('success', () => resolve(request.result));

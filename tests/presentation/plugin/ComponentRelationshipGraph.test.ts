@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {
+  ComponentQueryMatch,
   ComponentInventorySnapshot,
   ComponentRelationshipGraph,
   TrackedComponent
@@ -82,4 +83,36 @@ test('buildComponentRelationshipGraphFromCache always uses cached vulnerabilitie
   assert.equal(capturedComponents, inventory.catalog.components);
   assert.deepEqual(capturedVulnerabilities, cachedVulnerabilities);
   assert.notEqual(capturedVulnerabilities, cachedVulnerabilities);
+});
+
+test('buildComponentRelationshipGraphFromCache forwards purl query cache matches to the graph builder', () => {
+  const components = [createComponent()];
+  const inventory = createInventory(components);
+  const cachedVulnerabilities = [createVulnerability('OSV-2026-1')];
+  const queryMatches = new Map<string, readonly ComponentQueryMatch[]>([[
+    'pkg:npm/widget@1.2.3',
+    [{
+      queriedPurl: 'pkg:npm/widget@1.2.3',
+      sourceId: 'osv-default',
+      vulnerability: cachedVulnerabilities[0]!,
+      vulnerabilityCacheKey: 'osv-default::OSV-2026-1',
+      vulnerabilityId: 'OSV-2026-1'
+    }]
+  ]]);
+  let capturedOptions:
+    | { purlQueryCacheMatches?: ReadonlyMap<string, readonly ComponentQueryMatch[]> }
+    | undefined;
+
+  buildComponentRelationshipGraphFromCache({
+    buildGraph: (_receivedComponents, _receivedVulnerabilities, options) => {
+      capturedOptions = options;
+      return {
+        componentsByVulnerability: new Map(),
+        relationships: [],
+        vulnerabilitiesByComponent: new Map()
+      };
+    }
+  }, inventory, cachedVulnerabilities, { purlQueryCacheMatches: queryMatches });
+
+  assert.equal(capturedOptions?.purlQueryCacheMatches, queryMatches);
 });

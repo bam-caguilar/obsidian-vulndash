@@ -1,4 +1,5 @@
 import type {
+  ComponentQueryMatch,
   ComponentInventorySnapshot,
   ComponentRelationshipGraph,
   TrackedComponent
@@ -8,13 +9,19 @@ import type { Vulnerability } from '../../domain/entities/Vulnerability';
 interface ComponentRelationshipGraphBuilder {
   buildGraph(
     components: readonly TrackedComponent[],
-    vulnerabilities: readonly Vulnerability[]
+    vulnerabilities: readonly Vulnerability[],
+    options?: {
+      purlQueryCacheMatches?: ReadonlyMap<string, readonly ComponentQueryMatch[]>;
+    }
   ): ComponentRelationshipGraph;
 }
 
 export const buildComponentRelationshipGraphFromCache = (
   graphBuilder: ComponentRelationshipGraphBuilder,
   inventory: ComponentInventorySnapshot,
-  cachedVulnerabilities: readonly Vulnerability[]
+  cachedVulnerabilities: readonly Vulnerability[],
+  options: {
+    purlQueryCacheMatches?: ReadonlyMap<string, readonly ComponentQueryMatch[]>;
+  } = {}
 ): ComponentRelationshipGraph =>
-  graphBuilder.buildGraph(inventory.catalog.components, [...cachedVulnerabilities]);
+  graphBuilder.buildGraph(inventory.catalog.components, [...cachedVulnerabilities], options);

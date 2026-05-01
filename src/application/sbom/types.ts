@@ -5,6 +5,7 @@ import type {
   NormalizedSeverity,
   NormalizedVulnerability
 } from '../../domain/sbom/types';
+import type { Vulnerability } from '../../domain/entities/Vulnerability';
 
 export interface TrackedComponentSource {
   componentId: string;
@@ -62,7 +63,22 @@ export interface ComponentInventorySnapshot {
   parsedSbomCount: number;
 }
 
-export type ComponentVulnerabilityLinkEvidence = 'cpe' | 'explicit' | 'name-version' | 'purl';
+export type ComponentVulnerabilityLinkEvidence =
+  | 'component-query-cache'
+  | 'cpe'
+  | 'explicit'
+  | 'name-version'
+  | 'osv-query-purl'
+  | 'payload-purl'
+  | 'purl';
+
+export interface ComponentQueryMatch {
+  queriedPurl: string;
+  sourceId: string;
+  vulnerability: Vulnerability;
+  vulnerabilityCacheKey: string;
+  vulnerabilityId: string;
+}
 
 export interface ComponentVulnerabilityRelationship {
   componentKey: string;

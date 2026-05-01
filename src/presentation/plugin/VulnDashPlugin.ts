@@ -11,9 +11,11 @@ import {
   VulnDashAppModule
 } from '../../application/VulnDashAppModule';
 import type {
+  ComponentQueryMatch,
   ComponentCatalog,
   ComponentInventorySnapshot,
-  ComponentInventoryWorkspaceSnapshot
+  ComponentInventoryWorkspaceSnapshot,
+  TrackedComponent
 } from '../../application/sbom/types';
 import type { PipelineEvent } from '../../application/pipeline/PipelineEvents';
 import type { ChangedVulnerabilityIds } from '../../application/pipeline/PipelineTypes';
@@ -63,6 +65,7 @@ import { GenerateDailyRollupCommand } from '../commands/GenerateDailyRollupComma
 import { VulnDashSettingTab } from '../settings/VulnDashSettingsTab';
 import { CredentialStore } from '../../infrastructure/security/CredentialStore';
 import { buildComponentRelationshipGraphFromCache } from './ComponentRelationshipGraph';
+import { parsePersistedVulnerabilityKey } from '../../infrastructure/storage/VulnCacheSchema';
 
 const areStringListsEqual = (left: string[], right: string[]): boolean =>
   left.length === right.length && left.every((value, index) => value === right[index]);
@@ -477,13 +480,15 @@ export default class VulnDashPlugin extends Plugin {
     const appModule = this.getAppModule();
     const loadResults = await appModule.sbomImportService.loadAllSboms(this.settings);
     const inventory = appModule.componentInventoryService.buildSnapshot(this.settings, loadResults);
+    const purlQueryCacheMatches = await this.loadComponentQueryCacheMatches(inventory.catalog.components);
 
     return {
       inventory,
       relationships: buildComponentRelationshipGraphFromCache(
         appModule.componentVulnerabilityLinkService,
         inventory,
-        this.cachedVulnerabilities
+        this.cachedVulnerabilities,
+        { purlQueryCacheMatches }
       )
     };
   }
@@ -568,10 +573,12 @@ export default class VulnDashPlugin extends Plugin {
     const appModule = this.getAppModule();
     const loadResults = await appModule.sbomImportService.loadAllSboms(this.settings);
     const inventory = appModule.componentInventoryService.buildSnapshot(this.settings, loadResults);
+    const purlQueryCacheMatches = await this.loadComponentQueryCacheMatches(inventory.catalog.components);
     const relationships = buildComponentRelationshipGraphFromCache(
       appModule.componentVulnerabilityLinkService,
       inventory,
-      this.cachedVulnerabilities
+      this.cachedVulnerabilities,
+      { purlQueryCacheMatches }
     );
 
     return {
@@ -584,6 +591,78 @@ export default class VulnDashPlugin extends Plugin {
         relationships
       }
     };
+  }
+
+  private async loadComponentQueryCacheMatches(
+    components: readonly TrackedComponent[]
+  ): Promise<ReadonlyMap<string, readonly ComponentQueryMatch[]>> {
+    const cacheRepository = this.persistentCacheServices?.cacheRepository;
+    if (!cacheRepository) {
+      return new Map();
+    }
+
+    const purls = Array.from(new Set(components
+      .flatMap((component) => typeof component.purl === 'string' ? [component.purl.trim()] : [])
+      .filter(Boolean)))
+      .sort((left, right) => left.localeCompare(right));
+    if (purls.length === 0) {
+      return new Map();
+    }
+
+    const queryRecordsByPurl = await cacheRepository.loadComponentQueries(purls);
+    const cacheKeys = Array.from(new Set(Array.from(queryRecordsByPurl.values())
+      .flatMap((record) => record.vulnerabilityCacheKeys)))
+      .sort((left, right) => left.localeCompare(right));
+    if (cacheKeys.length === 0) {
+      return new Map();
+    }
+
+    const persistedByCacheKey = await cacheRepository.loadPersistedVulnerabilitiesByCacheKeys(cacheKeys);
+    const vulnerabilitiesById = new Map<string, Vulnerability[]>();
+    for (const vulnerability of this.cachedVulnerabilities) {
+      const entries = vulnerabilitiesById.get(vulnerability.id) ?? [];
+      entries.push(vulnerability);
+      vulnerabilitiesById.set(vulnerability.id, entries);
+    }
+
+    const matchesByPurl = new Map<string, ComponentQueryMatch[]>();
+    for (const [purl, record] of queryRecordsByPurl) {
+      const matchesByCacheKey = new Map<string, ComponentQueryMatch>();
+      for (const vulnerabilityCacheKey of record.vulnerabilityCacheKeys) {
+        const persisted = persistedByCacheKey.get(vulnerabilityCacheKey);
+        const parsedKey = parsePersistedVulnerabilityKey(vulnerabilityCacheKey);
+        const vulnerabilityId = persisted?.vulnerabilityId ?? parsedKey?.vulnerabilityId;
+        if (!vulnerabilityId) {
+          continue;
+        }
+
+        const resolvedVulnerability = persisted?.vulnerability
+          ?? vulnerabilitiesById.get(vulnerabilityId)?.find((candidate) =>
+            !parsedKey || candidate.id === parsedKey.vulnerabilityId);
+        if (!resolvedVulnerability) {
+          continue;
+        }
+
+        matchesByCacheKey.set(vulnerabilityCacheKey, {
+          queriedPurl: record.purl,
+          sourceId: persisted?.sourceId ?? parsedKey?.sourceId ?? record.source,
+          vulnerability: resolvedVulnerability,
+          vulnerabilityCacheKey,
+          vulnerabilityId
+        });
+      }
+
+      const matches = Array.from(matchesByCacheKey.values()).sort((left, right) =>
+        left.vulnerabilityCacheKey.localeCompare(right.vulnerabilityCacheKey)
+        || left.vulnerabilityId.localeCompare(right.vulnerabilityId)
+        || left.sourceId.localeCompare(right.sourceId)
+      );
+      if (matches.length > 0) {
+        matchesByPurl.set(purl, matches);
+      }
+    }
+
+    return matchesByPurl;
   }
 
   private async resolveAffectedProjectMap(vulnerabilities: readonly Vulnerability[]): Promise<Map<string, AffectedProjectResolution>> {

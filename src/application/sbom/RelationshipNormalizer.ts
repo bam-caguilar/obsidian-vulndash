@@ -10,10 +10,13 @@ import type {
 import { ComponentIdentityService } from './ComponentIdentityService';
 
 const evidenceRank: Record<ComponentVulnerabilityLinkEvidence, number> = {
+  'payload-purl': 0,
   purl: 0,
-  cpe: 1,
-  'name-version': 2,
-  explicit: 3
+  'osv-query-purl': 1,
+  'component-query-cache': 2,
+  cpe: 3,
+  'name-version': 4,
+  explicit: 5
 };
 
 const compareStrings = (left: string, right: string): number =>
