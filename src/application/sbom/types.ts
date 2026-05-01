@@ -80,6 +80,33 @@ export interface ComponentQueryMatch {
   vulnerabilityId: string;
 }
 
+export type ComponentPurlQueryState =
+  | 'error'
+  | 'hit'
+  | 'miss'
+  | 'not-queried'
+  | 'queried'
+  | 'stale';
+
+export interface ComponentPurlMatchFinding {
+  cacheKey?: string;
+  evidence: ComponentVulnerabilityLinkEvidence;
+  source: string;
+  vulnerabilityId: string;
+}
+
+export interface ComponentPurlMatchSummary {
+  cachedHitCount: number;
+  cachedHits: readonly ComponentPurlMatchFinding[];
+  componentKey: string;
+  componentName: string;
+  componentVersion?: string;
+  correlatedMatchCount: number;
+  correlatedMatches: readonly ComponentPurlMatchFinding[];
+  normalizedPurl: string;
+  queryState: ComponentPurlQueryState;
+}
+
 export interface ComponentVulnerabilityRelationship {
   componentKey: string;
   evidence: ComponentVulnerabilityLinkEvidence;
@@ -119,6 +146,7 @@ export interface ComponentRelationshipGraph {
 
 export interface ComponentInventoryWorkspaceSnapshot {
   inventory: ComponentInventorySnapshot;
+  purlMatches: readonly ComponentPurlMatchSummary[];
   relationships: ComponentRelationshipGraph;
 }
 

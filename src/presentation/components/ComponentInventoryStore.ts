@@ -4,6 +4,7 @@ import type {
 } from '../../domain/sbom/types';
 import { getHighestSeverity, getSeverityRank } from '../../domain/value-objects/Severity';
 import type {
+  ComponentPurlMatchSummary,
   ComponentInventoryWorkspaceSnapshot,
   RelatedVulnerabilitySummary,
   TrackedComponent
@@ -32,6 +33,7 @@ export interface ComponentInventoryDerivedState {
   availableSourceFiles: string[];
   components: ComponentInventoryDisplayEntry[];
   hasActiveFilters: boolean;
+  purlMatches: ComponentPurlMatchSummary[];
   summary: ComponentInventorySummary;
 }
 
@@ -214,12 +216,19 @@ export const filterTrackedComponents = (
 export const deriveComponentInventoryState = (
   snapshot: ComponentInventoryWorkspaceSnapshot,
   filters: ComponentInventoryFilters
-): ComponentInventoryDerivedState => ({
-  availableSourceFiles: snapshot.inventory.catalog.sourceFiles,
-  components: filterTrackedComponents(snapshot.inventory.catalog.components.map((component) => toDisplayEntry(snapshot, component)), filters),
-  hasActiveFilters: hasActiveComponentInventoryFilters(filters),
-  summary: summarizeComponentInventory(snapshot.inventory.catalog.components.map((component) => toDisplayEntry(snapshot, component)))
-});
+): ComponentInventoryDerivedState => {
+  const allComponents = snapshot.inventory.catalog.components.map((component) => toDisplayEntry(snapshot, component));
+  const filteredComponents = filterTrackedComponents(allComponents, filters);
+  const visibleComponentKeys = new Set(filteredComponents.map((entry) => entry.component.key));
+
+  return {
+    availableSourceFiles: snapshot.inventory.catalog.sourceFiles,
+    components: filteredComponents,
+    hasActiveFilters: hasActiveComponentInventoryFilters(filters),
+    purlMatches: snapshot.purlMatches.filter((match) => visibleComponentKeys.has(match.componentKey)),
+    summary: summarizeComponentInventory(allComponents)
+  };
+};
 
 export const hasActiveComponentInventoryFilters = (
   filters: ComponentInventoryFilters
