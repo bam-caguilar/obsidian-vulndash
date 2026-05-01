@@ -129,21 +129,6 @@ const resolveSeverity = (payload: OsvVulnerabilityPayload): { cvssScore: number;
   };
 };
 
-const stripPurlVersion = (purl: string): string => {
-  const hashIndex = purl.indexOf('#');
-  const withoutSubpath = hashIndex >= 0 ? purl.slice(0, hashIndex) : purl;
-  const queryIndex = withoutSubpath.indexOf('?');
-  const withoutQualifiers = queryIndex >= 0 ? withoutSubpath.slice(0, queryIndex) : withoutSubpath;
-  const lastAt = withoutQualifiers.lastIndexOf('@');
-  const lastSlash = withoutQualifiers.lastIndexOf('/');
-
-  if (lastAt > lastSlash) {
-    return withoutQualifiers.slice(0, lastAt);
-  }
-
-  return withoutQualifiers;
-};
-
 const extractPurlVersion = (purl: string): string | undefined => {
   const hashIndex = purl.indexOf('#');
   const withoutSubpath = hashIndex >= 0 ? purl.slice(0, hashIndex) : purl;
@@ -157,6 +142,47 @@ const extractPurlVersion = (purl: string): string | undefined => {
   }
 
   return undefined;
+};
+
+const parseNormalizedPurl = (purl: string): {
+  ecosystem: string;
+  name: string;
+  purl: string;
+  version?: string;
+} | null => {
+  const normalized = PurlNormalizer.normalize(purl);
+  if (!normalized?.startsWith('pkg:')) {
+    return null;
+  }
+
+  const hashIndex = normalized.indexOf('#');
+  const withoutSubpath = hashIndex >= 0 ? normalized.slice(0, hashIndex) : normalized;
+  const queryIndex = withoutSubpath.indexOf('?');
+  const withoutQualifiers = queryIndex >= 0 ? withoutSubpath.slice(0, queryIndex) : withoutSubpath;
+  const trimmed = withoutQualifiers.slice(4).replace(/^\/+/, '').replace(/\/+$/, '');
+  const firstSlash = trimmed.indexOf('/');
+  if (firstSlash <= 0 || firstSlash === trimmed.length - 1) {
+    return null;
+  }
+
+  const ecosystem = trimmed.slice(0, firstSlash);
+  const packagePathWithVersion = trimmed.slice(firstSlash + 1);
+  const lastAt = packagePathWithVersion.lastIndexOf('@');
+  const lastSlash = packagePathWithVersion.lastIndexOf('/');
+  const hasVersion = lastAt > lastSlash && lastAt < packagePathWithVersion.length - 1;
+  const name = hasVersion ? packagePathWithVersion.slice(0, lastAt) : packagePathWithVersion;
+  const version = hasVersion ? packagePathWithVersion.slice(lastAt + 1) : undefined;
+
+  if (!ecosystem || !name) {
+    return null;
+  }
+
+  return {
+    ecosystem,
+    name,
+    purl: normalized,
+    ...(version ? { version } : {})
+  };
 };
 
 const buildVersionRange = (affected: OsvAffectedPayload): string | undefined => {
@@ -188,22 +214,43 @@ const buildVersionRange = (affected: OsvAffectedPayload): string | undefined => 
 
 const toAffectedPackage = (affected: OsvAffectedPayload): VulnerabilityAffectedPackage | null => {
   const normalizedPurl = PurlNormalizer.normalize(affected.package?.purl);
-  const packageName = sanitizeText(affected.package?.name ?? '');
-  const ecosystem = sanitizeText(affected.package?.ecosystem ?? '');
+  const parsedPurl = normalizedPurl ? parseNormalizedPurl(normalizedPurl) : null;
+  const packageName = sanitizeText(affected.package?.name ?? parsedPurl?.name ?? '');
+  const ecosystem = sanitizeText(affected.package?.ecosystem ?? parsedPurl?.ecosystem ?? '');
 
   if (!normalizedPurl && !packageName) {
     return null;
   }
 
-  const version = normalizedPurl ? extractPurlVersion(normalizedPurl) : undefined;
+  const version = parsedPurl?.version ?? (normalizedPurl ? extractPurlVersion(normalizedPurl) : undefined);
   const vulnerableVersionRange = buildVersionRange(affected);
 
   return {
-    name: packageName || stripPurlVersion(normalizedPurl ?? ''),
+    name: packageName,
     ...(ecosystem ? { ecosystem } : {}),
+    ...(normalizedPurl ? { evidence: 'payload-purl' as const } : {}),
     ...(normalizedPurl ? { purl: normalizedPurl } : {}),
     ...(version ? { version } : {}),
     ...(vulnerableVersionRange ? { vulnerableVersionRange } : {})
+  };
+};
+
+const buildQueriedPurlFallbackPackage = (queriedPurl: string): (VulnerabilityAffectedPackage & {
+  evidence: 'osv-query-purl';
+  ecosystem: string;
+  purl: string;
+}) | null => {
+  const parsed = parseNormalizedPurl(queriedPurl);
+  if (!parsed) {
+    return null;
+  }
+
+  return {
+    evidence: 'osv-query-purl',
+    ecosystem: parsed.ecosystem,
+    name: parsed.name,
+    purl: parsed.purl,
+    ...(parsed.version ? { version: parsed.version } : {})
   };
 };
 
@@ -226,7 +273,7 @@ const buildStableId = (payload: OsvVulnerabilityPayload): string => {
 export class OsvMapper {
   public constructor(private readonly sourceName: string) {}
 
-  public normalize(payload: OsvVulnerabilityPayload): Vulnerability {
+  public normalize(payload: OsvVulnerabilityPayload, queriedPurl?: string): Vulnerability {
     const id = buildStableId(payload);
     const publishedAt = sanitizeText(payload.published ?? payload.modified ?? new Date(0).toISOString());
     const updatedAt = sanitizeText(payload.modified ?? publishedAt);
@@ -237,6 +284,30 @@ export class OsvMapper {
     const affectedPackages = (payload.affected ?? [])
       .map((affected) => toAffectedPackage(affected))
       .filter((affectedPackage): affectedPackage is VulnerabilityAffectedPackage => affectedPackage !== null);
+    const inferredPackage = queriedPurl ? buildQueriedPurlFallbackPackage(queriedPurl) : null;
+    const hasExplicitPurl = affectedPackages.some((affectedPackage) => Boolean(affectedPackage.purl));
+    if (!hasExplicitPurl && inferredPackage) {
+      const mergeIndex = affectedPackages.findIndex((affectedPackage) =>
+        !affectedPackage.purl
+        && affectedPackage.name.trim().toLowerCase() === inferredPackage.name.toLowerCase()
+        && (!affectedPackage.ecosystem
+          || affectedPackage.ecosystem.trim().toLowerCase() === inferredPackage.ecosystem.toLowerCase())
+      );
+      if (mergeIndex >= 0) {
+        const target = affectedPackages[mergeIndex];
+        if (target) {
+          affectedPackages[mergeIndex] = {
+            ...target,
+            ...(target.ecosystem ? {} : { ecosystem: inferredPackage.ecosystem }),
+            evidence: inferredPackage.evidence,
+            purl: inferredPackage.purl,
+            ...(target.version ? {} : inferredPackage.version ? { version: inferredPackage.version } : {})
+          };
+        }
+      } else {
+        affectedPackages.push(inferredPackage);
+      }
+    }
     const affectedProducts = uniqueNonEmpty(affectedPackages.map((affectedPackage) => affectedPackage.name));
     const aliases = uniqueNonEmpty(payload.aliases ?? []);
     const related = uniqueNonEmpty(payload.related ?? []);

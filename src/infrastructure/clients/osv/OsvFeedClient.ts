@@ -527,7 +527,7 @@ export class OsvFeedClient extends ClientBase implements VulnerabilityFeed {
     const resultsByPurl = new Map<string, readonly Vulnerability[]>();
 
     for (const [purl, payloads] of accumulated) {
-      resultsByPurl.set(purl, this.dedupeVulnerabilities(payloads.map((payload) => this.mapper.normalize(payload))));
+      resultsByPurl.set(purl, this.dedupeVulnerabilities(payloads.map((payload) => this.mapper.normalize(payload, purl))));
     }
 
     return resultsByPurl;
