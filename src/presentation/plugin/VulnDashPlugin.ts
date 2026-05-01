@@ -62,6 +62,7 @@ import { VULNDASH_VIEW_TYPE, VulnDashView } from '../views/VulnDashView';
 import { GenerateDailyRollupCommand } from '../commands/GenerateDailyRollupCommand';
 import { VulnDashSettingTab } from '../settings/VulnDashSettingsTab';
 import { CredentialStore } from '../../infrastructure/security/CredentialStore';
+import { buildComponentRelationshipGraphFromCache } from './ComponentRelationshipGraph';
 
 const areStringListsEqual = (left: string[], right: string[]): boolean =>
   left.length === right.length && left.every((value, index) => value === right[index]);
@@ -479,9 +480,10 @@ export default class VulnDashPlugin extends Plugin {
 
     return {
       inventory,
-      relationships: appModule.componentVulnerabilityLinkService.buildGraph(
-        inventory.catalog.components,
-        this.visibleVulnerabilities
+      relationships: buildComponentRelationshipGraphFromCache(
+        appModule.componentVulnerabilityLinkService,
+        inventory,
+        this.cachedVulnerabilities
       )
     };
   }
@@ -559,16 +561,17 @@ export default class VulnDashPlugin extends Plugin {
     ] as const));
   }
 
-  private async buildCorrelationWorkspace(vulnerabilities: readonly Vulnerability[]): Promise<{
+  private async buildCorrelationWorkspace(): Promise<{
     componentIndex: ReturnType<VulnDashAppModule['sbomComponentIndex']['build']>;
     snapshot: ComponentInventoryWorkspaceSnapshot;
   }> {
     const appModule = this.getAppModule();
     const loadResults = await appModule.sbomImportService.loadAllSboms(this.settings);
     const inventory = appModule.componentInventoryService.buildSnapshot(this.settings, loadResults);
-    const relationships = appModule.componentVulnerabilityLinkService.buildGraph(
-      inventory.catalog.components,
-      [...vulnerabilities]
+    const relationships = buildComponentRelationshipGraphFromCache(
+      appModule.componentVulnerabilityLinkService,
+      inventory,
+      this.cachedVulnerabilities
     );
 
     return {
@@ -588,7 +591,7 @@ export default class VulnDashPlugin extends Plugin {
       return new Map();
     }
 
-    const workspace = await this.buildCorrelationWorkspace(vulnerabilities);
+    const workspace = await this.buildCorrelationWorkspace();
     return this.getAppModule().resolveAffectedProjects.execute({
       componentIndex: workspace.componentIndex,
       relationships: workspace.snapshot.relationships,
