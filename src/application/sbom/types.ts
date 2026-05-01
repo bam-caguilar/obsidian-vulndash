@@ -5,6 +5,7 @@ import type {
   NormalizedSeverity,
   NormalizedVulnerability
 } from '../../domain/sbom/types';
+import type { Vulnerability } from '../../domain/entities/Vulnerability';
 
 export interface TrackedComponentSource {
   componentId: string;
@@ -62,7 +63,49 @@ export interface ComponentInventorySnapshot {
   parsedSbomCount: number;
 }
 
-export type ComponentVulnerabilityLinkEvidence = 'cpe' | 'explicit' | 'name-version' | 'purl';
+export type ComponentVulnerabilityLinkEvidence =
+  | 'component-query-cache'
+  | 'cpe'
+  | 'explicit'
+  | 'name-version'
+  | 'osv-query-purl'
+  | 'payload-purl'
+  | 'purl';
+
+export interface ComponentQueryMatch {
+  queriedPurl: string;
+  sourceId: string;
+  vulnerability: Vulnerability;
+  vulnerabilityCacheKey: string;
+  vulnerabilityId: string;
+}
+
+export type ComponentPurlQueryState =
+  | 'error'
+  | 'hit'
+  | 'miss'
+  | 'not-queried'
+  | 'queried'
+  | 'stale';
+
+export interface ComponentPurlMatchFinding {
+  cacheKey?: string;
+  evidence: ComponentVulnerabilityLinkEvidence;
+  source: string;
+  vulnerabilityId: string;
+}
+
+export interface ComponentPurlMatchSummary {
+  cachedHitCount: number;
+  cachedHits: readonly ComponentPurlMatchFinding[];
+  componentKey: string;
+  componentName: string;
+  componentVersion?: string;
+  correlatedMatchCount: number;
+  correlatedMatches: readonly ComponentPurlMatchFinding[];
+  normalizedPurl: string;
+  queryState: ComponentPurlQueryState;
+}
 
 export interface ComponentVulnerabilityRelationship {
   componentKey: string;
@@ -120,7 +163,7 @@ export interface ComponentPurlQueryMatchSummary {
 
 export interface ComponentInventoryWorkspaceSnapshot {
   inventory: ComponentInventorySnapshot;
-  purlMatches: ComponentPurlQueryMatchSummary[];
+  purlMatches: readonly ComponentPurlMatchSummary[];
   relationships: ComponentRelationshipGraph;
 }
 

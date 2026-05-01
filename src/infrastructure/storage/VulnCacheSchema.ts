@@ -124,6 +124,21 @@ const ensureStore = (
 export const buildPersistedVulnerabilityKey = (sourceId: string, vulnerabilityId: string): string =>
   `${sourceId.trim()}::${vulnerabilityId.trim()}`;
 
+export const parsePersistedVulnerabilityKey = (cacheKey: string): { sourceId: string; vulnerabilityId: string } | null => {
+  const separatorIndex = cacheKey.indexOf('::');
+  if (separatorIndex <= 0 || separatorIndex >= cacheKey.length - 2) {
+    return null;
+  }
+
+  const sourceId = cacheKey.slice(0, separatorIndex).trim();
+  const vulnerabilityId = cacheKey.slice(separatorIndex + 2).trim();
+  if (!sourceId || !vulnerabilityId) {
+    return null;
+  }
+
+  return { sourceId, vulnerabilityId };
+};
+
 export const getVulnerabilityFreshnessPublishedAtMs = (vulnerability: Pick<Vulnerability, 'publishedAt'>): number => {
   const parsed = Date.parse(vulnerability.publishedAt);
   return Number.isFinite(parsed) ? parsed : 0;

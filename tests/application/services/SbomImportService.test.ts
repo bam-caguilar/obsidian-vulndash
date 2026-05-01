@@ -206,6 +206,15 @@ test('returns cached runtime data when a later forced load fails', async () => {
 
   const failed = await service.loadSbom(config, { force: true });
   assert.equal(failed.success, false);
+  if (failed.success) {
+    return;
+  }
+
+  if (failed.reason !== 'failed') {
+    assert.fail('expected a terminal SBOM load failure');
+  }
+
+  assert.equal(failed.reason, 'failed');
   assert.equal(failed.cachedState?.components[0]?.originalName, 'portal-web');
 });
 
@@ -240,6 +249,14 @@ test('returns a safe failure for missing files', async () => {
   const result = await service.loadSbom(createSbomConfig());
 
   assert.equal(result.success, false);
+  if (result.success) {
+    return;
+  }
+
+  if (result.reason !== 'failed') {
+    assert.fail('expected a terminal SBOM load failure');
+  }
+
   assert.equal(result.error, 'ENOENT');
   assert.equal(service.getRuntimeState('sbom-1'), null);
 });
@@ -370,5 +387,50 @@ test('does not allow an older asynchronous SBOM load to overwrite a newer runtim
 
   assert.equal(firstLoad.fromCache, true);
   assert.equal(firstLoad.state.components[0]?.originalName, 'portal-web');
+  assert.equal(service.getRuntimeState(config.id)?.components[0]?.originalName, 'portal-web');
+});
+
+test('treats superseded asynchronous SBOM loads as benign cancellation instead of an error', async () => {
+  const reader = new SequencedSbomReader();
+  const firstRead = createDeferred<string>();
+  const secondRead = createDeferred<string>();
+  reader.enqueueRead(firstRead);
+  reader.enqueueRead(secondRead);
+
+  const service = new SbomImportService(reader);
+  const config = createSbomConfig();
+
+  const firstLoadPromise = service.loadSbom(config, { force: true });
+  const secondLoadPromise = service.loadSbom(config, { force: true });
+
+  firstRead.resolve(JSON.stringify({
+    bomFormat: 'CycloneDX',
+    components: [{ name: 'legacy-api' }]
+  }));
+
+  const firstLoad = await firstLoadPromise;
+  assert.equal(firstLoad.success, false);
+  if (firstLoad.success) {
+    return;
+  }
+
+  if (firstLoad.reason !== 'superseded') {
+    assert.fail('expected a superseded SBOM load result');
+  }
+
+  assert.equal(firstLoad.reason, 'superseded');
+
+  secondRead.resolve(JSON.stringify({
+    bomFormat: 'CycloneDX',
+    components: [{ name: 'portal-web' }]
+  }));
+
+  const secondLoad = await secondLoadPromise;
+  assert.equal(secondLoad.success, true);
+  if (!secondLoad.success) {
+    return;
+  }
+
+  assert.equal(secondLoad.state.components[0]?.originalName, 'portal-web');
   assert.equal(service.getRuntimeState(config.id)?.components[0]?.originalName, 'portal-web');
 });

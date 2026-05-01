@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {
+  ComponentPurlMatchSummary,
   ComponentInventoryWorkspaceSnapshot,
   RelatedVulnerabilitySummary,
   TrackedComponent
@@ -48,7 +49,8 @@ const createRelatedVulnerability = (
 
 const createSnapshot = (
   components: TrackedComponent[],
-  relationships?: Map<string, RelatedVulnerabilitySummary[]>
+  relationships?: Map<string, RelatedVulnerabilitySummary[]>,
+  purlMatches: readonly ComponentPurlMatchSummary[] = []
 ): ComponentInventoryWorkspaceSnapshot => ({
   inventory: {
     catalog: {
@@ -67,7 +69,8 @@ const createSnapshot = (
     componentsByVulnerability: new Map(),
     relationships: [],
     vulnerabilitiesByComponent: relationships ?? new Map()
-  }
+  },
+  purlMatches
 });
 
 test('filterTrackedComponents combines search, follow, enabled, vulnerability, severity, format, and source filters', () => {
@@ -178,4 +181,64 @@ test('deriveComponentInventoryState counts linked vulnerabilities even when the 
   assert.equal(derived.components[0]?.vulnerabilityCount, 1);
   assert.equal(derived.components[0]?.highestSeverity, 'high');
   assert.deepEqual(derived.components.map((entry) => entry.component.name), ['widget']);
+});
+
+test('deriveComponentInventoryState filters purl diagnostics to the visible component set', () => {
+  const snapshot = createSnapshot([
+    createComponent({
+      isFollowed: true,
+      key: 'purl:pkg:npm/lodash@4.17.21',
+      name: 'lodash',
+      purl: 'pkg:npm/lodash@4.17.21',
+      version: '4.17.21'
+    }),
+    createComponent({
+      isFollowed: false,
+      key: 'purl:pkg:npm/express@4.19.2',
+      name: 'express',
+      purl: 'pkg:npm/express@4.19.2',
+      version: '4.19.2'
+    })
+  ], undefined, [
+    {
+      cachedHitCount: 1,
+      cachedHits: [{
+        cacheKey: 'osv-default::GHSA-lodash',
+        evidence: 'component-query-cache',
+        source: 'OSV',
+        vulnerabilityId: 'GHSA-lodash'
+      }],
+      componentKey: 'purl:pkg:npm/lodash@4.17.21',
+      componentName: 'lodash',
+      componentVersion: '4.17.21',
+      correlatedMatchCount: 1,
+      correlatedMatches: [{
+        evidence: 'payload-purl',
+        source: 'OSV',
+        vulnerabilityId: 'GHSA-lodash'
+      }],
+      normalizedPurl: 'pkg:npm/lodash@4.17.21',
+      queryState: 'hit'
+    },
+    {
+      cachedHitCount: 0,
+      cachedHits: [],
+      componentKey: 'purl:pkg:npm/express@4.19.2',
+      componentName: 'express',
+      componentVersion: '4.19.2',
+      correlatedMatchCount: 0,
+      correlatedMatches: [],
+      normalizedPurl: 'pkg:npm/express@4.19.2',
+      queryState: 'not-queried'
+    }
+  ]);
+
+  const derived = deriveComponentInventoryState(snapshot, {
+    ...createDefaultComponentInventoryFilters(),
+    followedOnly: true
+  });
+
+  assert.deepEqual(derived.components.map((entry) => entry.component.name), ['lodash']);
+  assert.deepEqual(derived.purlMatches.map((entry) => entry.componentName), ['lodash']);
+  assert.equal(derived.purlMatches[0]?.queryState, 'hit');
 });

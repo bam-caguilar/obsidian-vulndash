@@ -120,6 +120,7 @@ test('buildSnapshot surfaces parse failures while preserving cached data context
         sourcePath: 'reports/fallback.spdx.json'
       },
       error: 'Unexpected token',
+      reason: 'failed',
       sbomId: 'sbom-2',
       success: false
     }
@@ -137,4 +138,19 @@ test('buildSnapshot surfaces parse failures while preserving cached data context
     sourcePath: 'reports/fallback.spdx.json',
     title: 'Fallback SBOM'
   }]);
+});
+
+test('buildSnapshot ignores superseded loads when collecting SBOM issues', () => {
+  const settings = createSettings();
+  const results: SbomLoadResult[] = [{
+    reason: 'superseded',
+    sbomId: 'sbom-1',
+    success: false
+  }];
+
+  const snapshot = service.buildSnapshot(settings, results);
+
+  assert.equal(snapshot.failedSbomCount, 0);
+  assert.equal(snapshot.parsedSbomCount, 0);
+  assert.deepEqual(snapshot.issues, []);
 });

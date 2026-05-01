@@ -102,3 +102,35 @@ test('OSV mapper normalizes severity aliases and preserves package metadata with
   assert.equal(vulnerability.metadata?.vulnerableVersionRanges?.[0], '@example/widget: < 1.2.4');
   assert.ok(vulnerability.references.includes('https://github.com/example/advisory'));
 });
+
+test('OSV mapper preserves the queried PURL as inferred package evidence when the payload omits package purl', () => {
+  const mapper = new OsvMapper('OSV');
+
+  const vulnerability = mapper.normalize({
+    id: 'OSV-2026-2001',
+    modified: '2026-04-22T00:00:00.000Z',
+    summary: 'Query-derived package evidence',
+    affected: [
+      {
+        package: {
+          ecosystem: 'npm',
+          name: '@example/widget'
+        },
+        ranges: [
+          {
+            type: 'ECOSYSTEM',
+            events: [
+              { introduced: '0' },
+              { fixed: '1.2.4' }
+            ]
+          }
+        ]
+      }
+    ]
+  }, 'PKG:NPM/%40EXAMPLE/WIDGET@1.2.3');
+
+  assert.equal(vulnerability.metadata?.affectedPackages?.[0]?.purl, 'pkg:npm/@example/widget@1.2.3');
+  assert.equal(vulnerability.metadata?.affectedPackages?.[0]?.evidence, 'osv-query-purl');
+  assert.equal(vulnerability.metadata?.affectedPackages?.[0]?.version, '1.2.3');
+  assert.equal(vulnerability.metadata?.affectedPackages?.[0]?.vulnerableVersionRange, '< 1.2.4');
+});

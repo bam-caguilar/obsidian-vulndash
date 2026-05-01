@@ -300,6 +300,45 @@ test('error-state query records do not suppress re-querying', async () => {
   assert.deepEqual(result.vulnerabilities.map((vulnerability) => vulnerability.id), ['OSV-2026-3']);
 });
 
+test('queried PURLs are preserved as inferred affected package evidence when OSV omits explicit package PURLs', async () => {
+  const queryCache = new FakeOsvQueryCache();
+  const activePurl = 'pkg:npm/@example/widget@1.2.3';
+  const httpClient = new FakeHttpClient([
+    async (body) => ({
+      status: 200,
+      headers: {},
+      data: {
+        results: body.queries.map(() => ({
+          vulns: [createVulnerabilityPayload('OSV-2026-3A', {
+            affected: [{
+              package: {
+                ecosystem: 'npm',
+                name: '@example/widget'
+              },
+              ranges: [{
+                type: 'ECOSYSTEM',
+                events: [
+                  { introduced: '0' },
+                  { fixed: '1.2.4' }
+                ]
+              }]
+            }]
+          })]
+        }))
+      }
+    })
+  ]);
+  const client = createClient(httpClient, queryCache, async () => [activePurl]);
+
+  const result = await client.fetchVulnerabilities({ signal: new AbortController().signal });
+  const affectedPackage = result.vulnerabilities[0]?.metadata?.affectedPackages?.[0];
+
+  assert.equal(affectedPackage?.purl, activePurl);
+  assert.equal(affectedPackage?.evidence, 'osv-query-purl');
+  assert.equal(affectedPackage?.version, '1.2.3');
+  assert.equal(affectedPackage?.vulnerableVersionRange, '< 1.2.4');
+});
+
 test('configured batch size chunks requests using the runtime config', async () => {
   const purls = Array.from({ length: 5 }, (_, index) => `pkg:npm/example-${index}@1.0.0`);
   const queryCache = new FakeOsvQueryCache();

@@ -1,4 +1,9 @@
-import type { ComponentInventorySnapshot, ComponentInventoryWorkspaceSnapshot } from '../../application/sbom/types';
+import type {
+  ComponentInventorySnapshot,
+  ComponentInventoryWorkspaceSnapshot,
+  ComponentPurlMatchSummary,
+  ComponentPurlQueryState
+} from '../../application/sbom/types';
 import { ComponentFilterBar } from './ComponentFilterBar';
 import {
   type ComponentInventoryDisplayEntry,
@@ -241,6 +246,7 @@ export class ComponentInventoryView {
     }
 
     this.renderTable(derivedState.components);
+    this.renderPurlDiagnostics(derivedState.purlMatches);
   }
 
   private renderSummaryLoading(): void {
@@ -379,6 +385,177 @@ export class ComponentInventoryView {
       }
 
       renderComponentRow(body, component, this.expandedKeys.has(component.key), rowCallbacks);
+    }
+  }
+
+  private renderPurlDiagnostics(
+    purlMatches: readonly ComponentPurlMatchSummary[]
+  ): void {
+    const diagnosticsShell = this.resultsHostEl?.createDiv({
+      cls: 'vulndash-component-diagnostics-shell vulndash-card-shell'
+    });
+    if (!diagnosticsShell) {
+      return;
+    }
+
+    diagnosticsShell.createEl('h3', { text: 'Vulnerabilities By PURL' });
+    diagnosticsShell.createEl('p', {
+      cls: 'vulndash-muted-copy',
+      text: 'Compares OSV query-cache hits with actual component-to-vulnerability correlations for the currently visible components.'
+    });
+
+    if (purlMatches.length === 0) {
+      const emptyState = diagnosticsShell.createDiv({
+        cls: 'vulndash-empty-state is-compact vulndash-component-diagnostics-empty-state'
+      });
+      emptyState.createEl('h4', { text: 'No PURL diagnostics available' });
+      emptyState.createEl('p', {
+        text: 'The visible components do not expose normalized PURLs yet, so no query-cache correlation diagnostics can be shown.'
+      });
+      return;
+    }
+
+    const tableShell = diagnosticsShell.createDiv({ cls: 'vulndash-component-diagnostics-table-shell' });
+    const table = tableShell.createEl('table', { cls: 'vulndash-component-diagnostics-table' });
+    const head = table.createEl('thead');
+    const headRow = head.createEl('tr');
+    for (const label of [
+      'Component',
+      'Normalized PURL',
+      'Query State',
+      'Cached Hits',
+      'Correlated Matches',
+      'Vulnerability IDs',
+      'Cache Keys',
+      'Evidence'
+    ]) {
+      headRow.createEl('th', { text: label });
+    }
+
+    const body = table.createEl('tbody');
+    for (const match of purlMatches) {
+      const row = body.createEl('tr');
+
+      const componentCell = row.createEl('td');
+      const componentStack = componentCell.createDiv({ cls: 'vulndash-component-diagnostics-stack' });
+      componentStack.createEl('strong', { text: match.componentName });
+      if (match.componentVersion) {
+        componentStack.createDiv({
+          cls: 'vulndash-muted-copy vulndash-component-table-mono',
+          text: match.componentVersion
+        });
+      }
+      componentStack.createDiv({
+        cls: 'vulndash-muted-copy vulndash-component-table-mono',
+        text: match.componentKey
+      });
+
+      row.createEl('td', {
+        cls: 'vulndash-component-table-mono vulndash-component-diagnostics-purl-cell',
+        text: match.normalizedPurl
+      });
+
+      const queryStateCell = row.createEl('td');
+      queryStateCell.createSpan({
+        cls: this.getQueryStateBadgeClass(match.queryState),
+        text: this.getQueryStateLabel(match.queryState)
+      });
+
+      row.createEl('td', { text: String(match.cachedHitCount) });
+      row.createEl('td', { text: String(match.correlatedMatchCount) });
+
+      this.renderDiagnosticsValueGroups(row.createEl('td'), [
+        {
+          label: 'Cached',
+          values: match.cachedHits.map((entry) => entry.vulnerabilityId)
+        },
+        {
+          label: 'Correlated',
+          values: match.correlatedMatches.map((entry) => entry.vulnerabilityId)
+        }
+      ]);
+
+      this.renderDiagnosticsValueGroups(row.createEl('td'), [{
+        label: 'Cached',
+        values: match.cachedHits.map((entry) => entry.cacheKey).filter((value): value is string => Boolean(value))
+      }]);
+
+      this.renderDiagnosticsValueGroups(row.createEl('td'), [{
+        label: 'Signals',
+        values: this.collectEvidenceSignals(match)
+      }]);
+    }
+  }
+
+  private renderDiagnosticsValueGroups(
+    containerEl: HTMLElement,
+    groups: ReadonlyArray<{
+      label: string;
+      values: readonly string[];
+    }>
+  ): void {
+    const shell = containerEl.createDiv({ cls: 'vulndash-component-diagnostics-groups' });
+    const renderedGroups = groups.filter((group) => group.values.length > 0);
+    if (renderedGroups.length === 0) {
+      shell.createDiv({ cls: 'vulndash-muted-copy', text: 'None' });
+      return;
+    }
+
+    for (const group of renderedGroups) {
+      const section = shell.createDiv({ cls: 'vulndash-component-diagnostics-group' });
+      section.createDiv({ cls: 'vulndash-component-diagnostics-group-label', text: group.label });
+      const values = section.createDiv({ cls: 'vulndash-component-diagnostics-value-list' });
+      for (const value of group.values) {
+        values.createDiv({
+          cls: 'vulndash-component-table-mono vulndash-component-diagnostics-value',
+          text: value
+        });
+      }
+    }
+  }
+
+  private collectEvidenceSignals(match: ComponentPurlMatchSummary): string[] {
+    const signals = new Set<string>();
+    for (const finding of match.cachedHits) {
+      signals.add(finding.evidence);
+    }
+    for (const finding of match.correlatedMatches) {
+      signals.add(finding.evidence);
+    }
+    return Array.from(signals).sort((left, right) => left.localeCompare(right));
+  }
+
+  private getQueryStateBadgeClass(state: ComponentPurlQueryState): string {
+    switch (state) {
+      case 'hit':
+        return 'vulndash-badge vulndash-badge-success';
+      case 'error':
+        return 'vulndash-badge vulndash-badge-danger';
+      case 'stale':
+        return 'vulndash-badge vulndash-badge-warning';
+      case 'miss':
+      case 'not-queried':
+      case 'queried':
+      default:
+        return 'vulndash-badge vulndash-badge-neutral';
+    }
+  }
+
+  private getQueryStateLabel(state: ComponentPurlQueryState): string {
+    switch (state) {
+      case 'not-queried':
+        return 'Not queried';
+      case 'stale':
+        return 'Stale';
+      case 'hit':
+        return 'Hit';
+      case 'miss':
+        return 'Miss';
+      case 'error':
+        return 'Error';
+      case 'queried':
+      default:
+        return 'Queried';
     }
   }
 

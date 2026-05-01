@@ -11,15 +11,24 @@ import {
   VulnDashAppModule
 } from '../../application/VulnDashAppModule';
 import type {
+  ComponentQueryMatch,
   ComponentCatalog,
   ComponentInventorySnapshot,
-  ComponentInventoryWorkspaceSnapshot
+  ComponentInventoryWorkspaceSnapshot,
+  ComponentPurlMatchFinding,
+  ComponentPurlMatchSummary,
+  ComponentPurlQueryState,
+  ComponentRelationshipGraph,
+  TrackedComponent
 } from '../../application/sbom/types';
+import { ComponentIdentityService } from '../../application/sbom/ComponentIdentityService';
 import type { PipelineEvent } from '../../application/pipeline/PipelineEvents';
 import type { ChangedVulnerabilityIds } from '../../application/pipeline/PipelineTypes';
 import { buildVulnerabilityCacheKey, createEmptyChangedVulnerabilityIds } from '../../application/pipeline/PipelineTypes';
 import type { SbomComparisonResult } from '../../application/use-cases/SbomComparisonService';
 import {
+  isSbomLoadFailureResult,
+  isSbomLoadSupersededResult,
   type SbomFileChangeStatus,
   type SbomLoadResult,
   type SbomValidationResult
@@ -60,9 +69,15 @@ import { VULNDASH_VIEW_TYPE, VulnDashView } from '../views/VulnDashView';
 import { GenerateDailyRollupCommand } from '../commands/GenerateDailyRollupCommand';
 import { VulnDashSettingTab } from '../settings/VulnDashSettingsTab';
 import { CredentialStore } from '../../infrastructure/security/CredentialStore';
+import { buildComponentRelationshipGraphFromCache } from './ComponentRelationshipGraph';
+import {
+  parsePersistedVulnerabilityKey,
+  type PersistedComponentQueryRecord
+} from '../../infrastructure/storage/VulnCacheSchema';
 
 const areStringListsEqual = (left: string[], right: string[]): boolean =>
   left.length === right.length && left.every((value, index) => value === right[index]);
+const componentIdentityService = new ComponentIdentityService();
 
 const createEmptySbomConfig = (index: number): ImportedSbomConfig => ({
   contentHash: '',
@@ -79,6 +94,11 @@ interface VisibleTriageState {
   readonly correlationKey: string;
   readonly record: TriageRecord | null;
   readonly state: TriageState;
+}
+
+interface ComponentQueryCacheContext {
+  readonly matchesByPurl: ReadonlyMap<string, readonly ComponentQueryMatch[]>;
+  readonly recordsByPurl: ReadonlyMap<string, PersistedComponentQueryRecord>;
 }
 
 export default class VulnDashPlugin extends Plugin {
@@ -335,8 +355,15 @@ export default class VulnDashPlugin extends Plugin {
 
     await this.applySettings(nextSettings, { recomputeFilters: sbom.enabled });
 
-    if (!result.success) {
+    if (isSbomLoadFailureResult(result)) {
       return { message: result.error, success: false };
+    }
+
+    if (isSbomLoadSupersededResult(result)) {
+      return {
+        message: `Skipped ${sbom.label} because a newer SBOM load replaced it.`,
+        success: true
+      };
     }
 
     return {
@@ -355,9 +382,9 @@ export default class VulnDashPlugin extends Plugin {
     let failed = 0;
 
     for (const result of resultMap.values()) {
-      if (result.success) {
+      if (result.success || isSbomLoadSupersededResult(result)) {
         succeeded += 1;
-      } else {
+      } else if (isSbomLoadFailureResult(result)) {
         failed += 1;
       }
     }
@@ -467,13 +494,22 @@ export default class VulnDashPlugin extends Plugin {
     const appModule = this.getAppModule();
     const loadResults = await appModule.sbomImportService.loadAllSboms(this.settings);
     const inventory = appModule.componentInventoryService.buildSnapshot(this.settings, loadResults);
+    const queryCacheContext = await this.loadComponentQueryCacheContext(inventory.catalog.components);
+    const relationships = buildComponentRelationshipGraphFromCache(
+      appModule.componentVulnerabilityLinkService,
+      inventory,
+      this.cachedVulnerabilities,
+      { purlQueryCacheMatches: queryCacheContext.matchesByPurl }
+    );
 
     return {
       inventory,
-      relationships: appModule.componentVulnerabilityLinkService.buildGraph(
+      purlMatches: this.buildComponentPurlMatchSummaries(
         inventory.catalog.components,
-        this.visibleVulnerabilities
-      )
+        relationships,
+        queryCacheContext
+      ),
+      relationships
     };
   }
 
@@ -513,7 +549,7 @@ export default class VulnDashPlugin extends Plugin {
       return result.state;
     }
 
-    return result.cachedState;
+    return isSbomLoadFailureResult(result) ? result.cachedState : null;
   }
 
   private collectCatalogDocuments(results: readonly SbomLoadResult[]): RuntimeSbomState['document'][] {
@@ -522,7 +558,7 @@ export default class VulnDashPlugin extends Plugin {
         return [result.state.document];
       }
 
-      return result.cachedState ? [result.cachedState.document] : [];
+      return isSbomLoadFailureResult(result) && result.cachedState ? [result.cachedState.document] : [];
     });
   }
 
@@ -530,7 +566,11 @@ export default class VulnDashPlugin extends Plugin {
     const sbomIdsBySourcePath = new Map<string, Set<string>>();
 
     for (const result of results) {
-      const state = result.success ? result.state : result.cachedState;
+      const state = result.success
+        ? result.state
+        : isSbomLoadFailureResult(result)
+          ? result.cachedState
+          : null;
       if (!state) {
         continue;
       }
@@ -546,16 +586,19 @@ export default class VulnDashPlugin extends Plugin {
     ] as const));
   }
 
-  private async buildCorrelationWorkspace(vulnerabilities: readonly Vulnerability[]): Promise<{
+  private async buildCorrelationWorkspace(): Promise<{
     componentIndex: ReturnType<VulnDashAppModule['sbomComponentIndex']['build']>;
     snapshot: ComponentInventoryWorkspaceSnapshot;
   }> {
     const appModule = this.getAppModule();
     const loadResults = await appModule.sbomImportService.loadAllSboms(this.settings);
     const inventory = appModule.componentInventoryService.buildSnapshot(this.settings, loadResults);
-    const relationships = appModule.componentVulnerabilityLinkService.buildGraph(
-      inventory.catalog.components,
-      [...vulnerabilities]
+    const queryCacheContext = await this.loadComponentQueryCacheContext(inventory.catalog.components);
+    const relationships = buildComponentRelationshipGraphFromCache(
+      appModule.componentVulnerabilityLinkService,
+      inventory,
+      this.cachedVulnerabilities,
+      { purlQueryCacheMatches: queryCacheContext.matchesByPurl }
     );
 
     return {
@@ -565,9 +608,209 @@ export default class VulnDashPlugin extends Plugin {
       ),
       snapshot: {
         inventory,
+        purlMatches: this.buildComponentPurlMatchSummaries(
+          inventory.catalog.components,
+          relationships,
+          queryCacheContext
+        ),
         relationships
       }
     };
+  }
+
+  private async loadComponentQueryCacheContext(
+    components: readonly TrackedComponent[]
+  ): Promise<ComponentQueryCacheContext> {
+    const cacheRepository = this.persistentCacheServices?.cacheRepository;
+    if (!cacheRepository) {
+      return {
+        matchesByPurl: new Map(),
+        recordsByPurl: new Map()
+      };
+    }
+
+    const purls = Array.from(new Set(components
+      .flatMap((component) => typeof component.purl === 'string' ? [component.purl.trim()] : [])
+      .filter(Boolean)))
+      .sort((left, right) => left.localeCompare(right));
+    if (purls.length === 0) {
+      return {
+        matchesByPurl: new Map(),
+        recordsByPurl: new Map()
+      };
+    }
+
+    const queryRecordsByPurl = await cacheRepository.loadComponentQueries(purls);
+    const recordsByNormalizedPurl = new Map<string, PersistedComponentQueryRecord>();
+    for (const [purl, record] of queryRecordsByPurl) {
+      const normalizedPurl = componentIdentityService.normalizePurlValue(purl);
+      const existing = recordsByNormalizedPurl.get(normalizedPurl);
+      if (!existing || record.lastQueriedAtMs > existing.lastQueriedAtMs || (
+        record.lastQueriedAtMs === existing.lastQueriedAtMs
+        && record.lastSeenInWorkspaceAtMs > existing.lastSeenInWorkspaceAtMs
+      )) {
+        recordsByNormalizedPurl.set(normalizedPurl, record);
+      }
+    }
+
+    const cacheKeys = Array.from(new Set(Array.from(queryRecordsByPurl.values())
+      .flatMap((record) => record.vulnerabilityCacheKeys)))
+      .sort((left, right) => left.localeCompare(right));
+    if (cacheKeys.length === 0) {
+      return {
+        matchesByPurl: new Map(),
+        recordsByPurl: recordsByNormalizedPurl
+      };
+    }
+
+    const persistedByCacheKey = await cacheRepository.loadPersistedVulnerabilitiesByCacheKeys(cacheKeys);
+    const vulnerabilitiesById = new Map<string, Vulnerability[]>();
+    for (const vulnerability of this.cachedVulnerabilities) {
+      const entries = vulnerabilitiesById.get(vulnerability.id) ?? [];
+      entries.push(vulnerability);
+      vulnerabilitiesById.set(vulnerability.id, entries);
+    }
+
+    const matchesByPurl = new Map<string, ComponentQueryMatch[]>();
+    for (const [, record] of queryRecordsByPurl) {
+      const matchesByCacheKey = new Map<string, ComponentQueryMatch>();
+      for (const vulnerabilityCacheKey of record.vulnerabilityCacheKeys) {
+        const persisted = persistedByCacheKey.get(vulnerabilityCacheKey);
+        const parsedKey = parsePersistedVulnerabilityKey(vulnerabilityCacheKey);
+        const vulnerabilityId = persisted?.vulnerabilityId ?? parsedKey?.vulnerabilityId;
+        if (!vulnerabilityId) {
+          continue;
+        }
+
+        const resolvedVulnerability = persisted?.vulnerability
+          ?? vulnerabilitiesById.get(vulnerabilityId)?.find((candidate) =>
+            !parsedKey || candidate.id === parsedKey.vulnerabilityId);
+        if (!resolvedVulnerability) {
+          continue;
+        }
+
+        matchesByCacheKey.set(vulnerabilityCacheKey, {
+          queriedPurl: record.purl,
+          sourceId: persisted?.sourceId ?? parsedKey?.sourceId ?? record.source,
+          vulnerability: resolvedVulnerability,
+          vulnerabilityCacheKey,
+          vulnerabilityId
+        });
+      }
+
+      const matches = Array.from(matchesByCacheKey.values()).sort((left, right) =>
+        left.vulnerabilityCacheKey.localeCompare(right.vulnerabilityCacheKey)
+        || left.vulnerabilityId.localeCompare(right.vulnerabilityId)
+        || left.sourceId.localeCompare(right.sourceId)
+      );
+      if (matches.length > 0) {
+        const normalizedPurl = componentIdentityService.normalizePurlValue(record.purl);
+        const existing = matchesByPurl.get(normalizedPurl) ?? [];
+        matchesByPurl.set(normalizedPurl, [...existing, ...matches].sort((left, right) =>
+          left.vulnerabilityCacheKey.localeCompare(right.vulnerabilityCacheKey)
+          || left.vulnerabilityId.localeCompare(right.vulnerabilityId)
+          || left.sourceId.localeCompare(right.sourceId)
+        ));
+      }
+    }
+
+    return {
+      matchesByPurl,
+      recordsByPurl: recordsByNormalizedPurl
+    };
+  }
+
+  private buildComponentPurlMatchSummaries(
+    components: readonly TrackedComponent[],
+    relationships: ComponentRelationshipGraph,
+    queryCacheContext: ComponentQueryCacheContext
+  ): ComponentPurlMatchSummary[] {
+    return components.flatMap((component) => {
+      const purl = component.purl?.trim();
+      if (!purl) {
+        return [];
+      }
+
+      const normalizedPurl = componentIdentityService.normalizePurlValue(purl);
+      const cachedHits = this.dedupeComponentPurlFindings(
+        (queryCacheContext.matchesByPurl.get(normalizedPurl) ?? []).map<ComponentPurlMatchFinding>((match) => ({
+          cacheKey: match.vulnerabilityCacheKey,
+          evidence: 'component-query-cache',
+          source: match.vulnerability.source,
+          vulnerabilityId: match.vulnerabilityId
+        }))
+      );
+      const correlatedMatches = this.dedupeComponentPurlFindings(
+        (relationships.vulnerabilitiesByComponent.get(component.key) ?? []).map<ComponentPurlMatchFinding>((match) => ({
+          evidence: match.evidence,
+          source: match.source,
+          vulnerabilityId: match.id
+        }))
+      );
+
+      return [{
+        cachedHitCount: cachedHits.length,
+        cachedHits,
+        componentKey: component.key,
+        componentName: component.name,
+        ...(component.version ? { componentVersion: component.version } : {}),
+        correlatedMatchCount: correlatedMatches.length,
+        correlatedMatches,
+        normalizedPurl,
+        queryState: this.resolveComponentPurlQueryState(
+          queryCacheContext.recordsByPurl.get(normalizedPurl),
+          cachedHits.length
+        )
+      }];
+    }).sort((left, right) =>
+      left.componentName.localeCompare(right.componentName)
+      || (left.componentVersion ?? '').localeCompare(right.componentVersion ?? '')
+      || left.normalizedPurl.localeCompare(right.normalizedPurl)
+      || left.componentKey.localeCompare(right.componentKey)
+    );
+  }
+
+  private dedupeComponentPurlFindings(
+    findings: readonly ComponentPurlMatchFinding[]
+  ): ComponentPurlMatchFinding[] {
+    const findingsByKey = new Map<string, ComponentPurlMatchFinding>();
+    for (const finding of findings) {
+      findingsByKey.set(
+        `${finding.source}||${finding.vulnerabilityId}||${finding.evidence}||${finding.cacheKey ?? ''}`,
+        finding
+      );
+    }
+
+    return Array.from(findingsByKey.values()).sort((left, right) =>
+      left.vulnerabilityId.localeCompare(right.vulnerabilityId)
+      || left.source.localeCompare(right.source)
+      || left.evidence.localeCompare(right.evidence)
+      || (left.cacheKey ?? '').localeCompare(right.cacheKey ?? '')
+    );
+  }
+
+  private resolveComponentPurlQueryState(
+    record: PersistedComponentQueryRecord | undefined,
+    cachedHitCount: number
+  ): ComponentPurlQueryState {
+    if (!record) {
+      return 'not-queried';
+    }
+
+    if (record.lastSeenInWorkspaceAtMs > record.lastQueriedAtMs) {
+      return 'stale';
+    }
+
+    switch (record.resultState) {
+      case 'error':
+        return 'error';
+      case 'miss':
+        return 'miss';
+      case 'hit':
+        return cachedHitCount > 0 ? 'hit' : 'queried';
+      default:
+        return 'queried';
+    }
   }
 
   private async resolveAffectedProjectMap(vulnerabilities: readonly Vulnerability[]): Promise<Map<string, AffectedProjectResolution>> {
@@ -575,7 +818,7 @@ export default class VulnDashPlugin extends Plugin {
       return new Map();
     }
 
-    const workspace = await this.buildCorrelationWorkspace(vulnerabilities);
+    const workspace = await this.buildCorrelationWorkspace();
     return this.getAppModule().resolveAffectedProjects.execute({
       componentIndex: workspace.componentIndex,
       relationships: workspace.snapshot.relationships,
@@ -605,10 +848,19 @@ export default class VulnDashPlugin extends Plugin {
       return normalizeImportedSbomConfig(sbom, index);
     }
 
-    if (!result.success) {
+    if (isSbomLoadFailureResult(result)) {
       return normalizeImportedSbomConfig({
         ...sbom,
         lastError: result.error
+      }, index);
+    }
+
+    if (isSbomLoadSupersededResult(result)) {
+      return normalizeImportedSbomConfig({
+        ...sbom,
+        ...(sbom.lastError !== undefined
+          ? { lastError: sbom.lastError === 'A newer SBOM load completed first.' ? '' : sbom.lastError }
+          : {})
       }, index);
     }
 
