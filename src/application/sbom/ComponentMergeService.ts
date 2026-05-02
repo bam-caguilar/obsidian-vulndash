@@ -3,6 +3,9 @@ import type {
   NormalizedSeverity,
   NormalizedVulnerability
 } from '../../domain/sbom/types';
+import { createComponentOccurrenceId } from '../../domain/sbom/ComponentOccurrence';
+import { UNASSIGNED_PROJECT_ID } from '../../domain/project/ProjectId';
+import { UNASSIGNED_PROJECT_NAME } from '../../domain/project/ProjectName';
 //import { PurlNormalizer } from '../../domain/services/PurlNormalizer';
 import { getHighestSeverity, getSeverityRank } from '../../domain/value-objects/Severity';
 import type { CatalogComponentInput, TrackedComponent, TrackedComponentSource } from './types';
@@ -222,7 +225,9 @@ const compareSourceRecords = (
   left: TrackedComponentSource,
   right: TrackedComponentSource
 ): number =>
-  left.sourcePath.localeCompare(right.sourcePath)
+  left.projectName.localeCompare(right.projectName)
+  || left.sbomFileName.localeCompare(right.sbomFileName)
+  || left.sourcePath.localeCompare(right.sourcePath)
   || left.format.localeCompare(right.format)
   || left.documentName.localeCompare(right.documentName)
   || left.name.localeCompare(right.name)
@@ -231,6 +236,8 @@ const compareSourceRecords = (
 
 const getSourceRecordKey = (source: TrackedComponentSource): string =>
   [
+    source.projectId,
+    source.sbomId,
     source.sourcePath,
     source.format,
     source.documentName,
@@ -251,26 +258,34 @@ export class ComponentMergeService {
     input: CatalogComponentInput
   ): TrackedComponent {
     const { component, document } = input;
+    const sbomId = document.sbomId?.trim() || document.sourcePath;
     const source: TrackedComponentSource = {
+      id: createComponentOccurrenceId(sbomId, {
+        componentId: component.id,
+        name: component.name,
+        ...(component.bomRef ? { bomRef: component.bomRef } : {}),
+        ...(component.purl ? { purl: component.purl } : {}),
+        ...(component.version ? { version: component.version } : {})
+      }),
       componentId: component.id,
+      componentKey: key,
       documentName: document.name,
       format: document.format,
       name: component.name,
-      sourcePath: document.sourcePath
+      projectId: document.projectId?.trim() || UNASSIGNED_PROJECT_ID,
+      projectName: document.projectName?.trim() || UNASSIGNED_PROJECT_NAME,
+      sbomFileName: document.sbomFileName?.trim() || document.sourcePath,
+      sbomId,
+      sbomLabel: document.sbomLabel?.trim() || document.name,
+      sourcePath: document.sourcePath,
+      vulnerabilityCount: component.vulnerabilities.length,
+      vulnerabilityIds: component.vulnerabilities.map((vulnerability) => vulnerability.id),
+      ...(component.version ? { version: component.version } : {}),
+      ...(component.bomRef ? { bomRef: component.bomRef } : {}),
+      ...(component.purl ? { purl: component.purl } : {}),
+      ...(component.cpe ? { cpe: component.cpe } : {}),
+      ...(component.notePath !== undefined ? { notePath: component.notePath } : {})
     };
-
-    if (component.version) {
-      source.version = component.version;
-    }
-    if (component.purl) {
-      source.purl = component.purl;
-    }
-    if (component.cpe) {
-      source.cpe = component.cpe;
-    }
-    if (component.notePath !== undefined) {
-      source.notePath = component.notePath;
-    }
 
     const tracked: TrackedComponent = {
       cweGroups: buildCweGroups(component.vulnerabilities),

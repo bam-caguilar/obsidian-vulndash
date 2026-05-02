@@ -97,6 +97,12 @@ const createEmptySbomConfig = (index: number): ImportedSbomConfig => ({
   projectNameSnapshot: ''
 });
 
+const getSbomFileName = (path: string, fallbackSourcePath: string): string => {
+  const normalized = (path.trim() || fallbackSourcePath).replace(/\\/g, '/');
+  const segments = normalized.split('/').filter(Boolean);
+  return segments.at(-1) ?? normalized;
+};
+
 type LoadedPluginData = SettingsMigrationInput;
 
 interface VisibleTriageState {
@@ -488,7 +494,7 @@ export default class VulnDashPlugin extends Plugin {
   public async getSbomCatalog(): Promise<ComponentCatalog> {
     const appModule = this.getAppModule();
     const loadResults = await appModule.sbomImportService.loadAllSboms(this.settings);
-    const catalog = appModule.sbomCatalogService.buildCatalog(this.collectCatalogDocuments(loadResults));
+    const catalog = appModule.sbomCatalogService.buildCatalog(this.collectCatalogInputs(loadResults));
     return appModule.componentPreferenceService.applyPreferences(catalog, this.settings);
   }
 
@@ -582,13 +588,32 @@ export default class VulnDashPlugin extends Plugin {
     return isSbomLoadFailureResult(result) ? result.cachedState : null;
   }
 
-  private collectCatalogDocuments(results: readonly SbomLoadResult[]): RuntimeSbomState['document'][] {
+  private collectCatalogInputs(results: readonly SbomLoadResult[]) {
+    const settingsById = new Map(this.settings.sboms.map((sbom) => [sbom.id, sbom] as const));
+
     return results.flatMap((result) => {
-      if (result.success) {
-        return [result.state.document];
+      const sbom = settingsById.get(result.sbomId);
+      if (!sbom) {
+        return [];
       }
 
-      return isSbomLoadFailureResult(result) && result.cachedState ? [result.cachedState.document] : [];
+      const state = result.success
+        ? result.state
+        : isSbomLoadFailureResult(result)
+          ? result.cachedState
+          : null;
+      if (!state) {
+        return [];
+      }
+
+      return [{
+        ...state.document,
+        projectId: sbom.projectId,
+        projectName: resolveProjectDisplayName(this.settings.projects, sbom.projectId, sbom.projectNameSnapshot),
+        sbomFileName: getSbomFileName(sbom.path, state.sourcePath),
+        sbomId: sbom.id,
+        sbomLabel: sbom.label
+      }];
     });
   }
 

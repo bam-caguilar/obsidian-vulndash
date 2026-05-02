@@ -4,7 +4,8 @@ import type {
   ComponentPurlMatchSummary,
   ComponentInventoryWorkspaceSnapshot,
   RelatedVulnerabilitySummary,
-  TrackedComponent
+  TrackedComponent,
+  TrackedComponentSource
 } from '../../../src/application/sbom/types';
 import {
   createDefaultComponentInventoryFilters,
@@ -12,27 +13,58 @@ import {
   filterTrackedComponents
 } from '../../../src/presentation/components/ComponentInventoryStore';
 
-const createComponent = (overrides: Partial<TrackedComponent> = {}): TrackedComponent => ({
-  cweGroups: [],
-  formats: ['cyclonedx'],
-  isEnabled: true,
-  isFollowed: false,
-  key: 'name-version:component@1.0.0',
+const createSource = (
+  overrides: Partial<TrackedComponentSource> = {}
+): TrackedComponentSource => ({
+  componentId: 'component-1',
+  componentKey: 'name-version:component@1.0.0',
+  documentName: 'a',
+  format: 'cyclonedx',
+  id: 'component-occurrence::sbom-a::component-1',
   name: 'component',
-  sourceFiles: ['reports/a.cdx.json'],
-  sources: [{
-    componentId: 'component-1',
-    documentName: 'a',
-    format: 'cyclonedx',
-    name: 'component',
-    sourcePath: 'reports/a.cdx.json',
-    version: '1.0.0'
-  }],
-  vulnerabilities: [],
+  projectId: 'project::portal-web',
+  projectName: 'Portal Web',
+  sbomFileName: 'a.cdx.json',
+  sbomId: 'sbom-a',
+  sbomLabel: 'a',
+  sourcePath: 'reports/a.cdx.json',
   vulnerabilityCount: 0,
+  vulnerabilityIds: [],
   version: '1.0.0',
   ...overrides
 });
+
+const createComponent = (overrides: Partial<TrackedComponent> = {}): TrackedComponent => {
+  const base: TrackedComponent = {
+    cweGroups: [],
+    formats: ['cyclonedx'],
+    isEnabled: true,
+    isFollowed: false,
+    key: 'name-version:component@1.0.0',
+    name: 'component',
+    sourceFiles: ['reports/a.cdx.json'],
+    sources: [],
+    vulnerabilities: [],
+    vulnerabilityCount: 0,
+    version: '1.0.0'
+  };
+  const component = {
+    ...base,
+    ...overrides
+  };
+
+  return {
+    ...component,
+    sources: overrides.sources ?? [createSource({
+      componentKey: component.key,
+      name: component.name,
+      vulnerabilityCount: component.vulnerabilityCount,
+      vulnerabilityIds: component.vulnerabilities.map((vulnerability) => vulnerability.id),
+      ...(component.purl ? { purl: component.purl } : {}),
+      ...(component.version ? { version: component.version } : {})
+    })]
+  };
+};
 
 const createRelatedVulnerability = (
   overrides: Partial<RelatedVulnerabilitySummary> = {}
@@ -51,27 +83,36 @@ const createSnapshot = (
   components: TrackedComponent[],
   relationships?: Map<string, RelatedVulnerabilitySummary[]>,
   purlMatches: readonly ComponentPurlMatchSummary[] = []
-): ComponentInventoryWorkspaceSnapshot => ({
-  inventory: {
-    catalog: {
-      componentCount: components.length,
-      components,
-      formats: ['cyclonedx', 'spdx'],
-      sourceFiles: ['reports/a.cdx.json', 'reports/b.spdx.json']
+): ComponentInventoryWorkspaceSnapshot => {
+  const occurrences = components.flatMap((component) => component.sources);
+  const occurrenceCount = occurrences.length;
+
+  return {
+    inventory: {
+      catalog: {
+        componentCount: components.length,
+        components,
+        formats: ['cyclonedx', 'spdx'],
+        occurrenceCount,
+        sourceFiles: ['reports/a.cdx.json', 'reports/b.spdx.json']
+      },
+      configuredSbomCount: 2,
+      enabledSbomCount: 2,
+      failedSbomCount: 0,
+      issues: [],
+      occurrences,
+      occurrenceCount,
+      parsedSbomCount: 2
     },
-    configuredSbomCount: 2,
-    enabledSbomCount: 2,
-    failedSbomCount: 0,
-    issues: [],
-    parsedSbomCount: 2
-  },
-  relationships: {
-    componentsByVulnerability: new Map(),
-    relationships: [],
-    vulnerabilitiesByComponent: relationships ?? new Map()
-  },
-  purlMatches
-});
+    relationships: {
+      componentsByVulnerability: new Map(),
+      relationships: [],
+      vulnerabilitiesByComponent: relationships ?? new Map(),
+      vulnerabilitiesByOccurrence: new Map()
+    },
+    purlMatches
+  };
+};
 
 test('filterTrackedComponents combines search, follow, enabled, vulnerability, severity, format, and source filters', () => {
   const snapshot = createSnapshot([
@@ -97,14 +138,21 @@ test('filterTrackedComponents combines search, follow, enabled, vulnerability, s
       key: 'name-version:express@4.19.2',
       name: 'express',
       sourceFiles: ['reports/b.spdx.json'],
-      sources: [{
+      sources: [createSource({
         componentId: 'component-2',
+        componentKey: 'name-version:express@4.19.2',
         documentName: 'b',
         format: 'spdx',
+        id: 'component-occurrence::sbom-b::component-2',
         name: 'express',
+        projectId: 'project::identity-api',
+        projectName: 'Identity API',
+        sbomFileName: 'b.spdx.json',
+        sbomId: 'sbom-b',
+        sbomLabel: 'b',
         sourcePath: 'reports/b.spdx.json',
         version: '4.19.2'
-      }],
+      })],
       version: '4.19.2'
     })
   ]);

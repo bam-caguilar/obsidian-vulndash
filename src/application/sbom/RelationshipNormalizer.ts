@@ -1,4 +1,5 @@
 import type { Vulnerability } from '../../domain/entities/Vulnerability';
+import type { ComponentOccurrence } from '../../domain/sbom/ComponentOccurrence';
 import type {
   ComponentRelationshipGraph,
   ComponentVulnerabilityLinkEvidence,
@@ -63,13 +64,14 @@ export class RelationshipNormalizer {
   public normalizeRelationshipGraph(
     relationships: readonly ComponentVulnerabilityRelationship[],
     componentsByKey: ReadonlyMap<string, TrackedComponent>,
+    occurrencesById: ReadonlyMap<string, ComponentOccurrence>,
     vulnerabilitiesByRef: ReadonlyMap<string, VulnerabilityIdentity & Pick<Vulnerability, 'cvssScore' | 'references' | 'severity' | 'title'>>
   ): ComponentRelationshipGraph {
     const dedupedByPair = new Map<string, ComponentVulnerabilityRelationship>();
 
     for (const relationship of relationships) {
       const normalized = this.normalizeRelationship(relationship);
-      const pairKey = `${normalized.componentKey}||${normalized.vulnerabilityRef}`;
+      const pairKey = `${normalized.occurrenceId}||${normalized.vulnerabilityRef}`;
       const existing = dedupedByPair.get(pairKey);
 
       if (!existing || evidenceRank[normalized.evidence] < evidenceRank[existing.evidence]) {
@@ -79,22 +81,25 @@ export class RelationshipNormalizer {
 
     const normalizedRelationships = Array.from(dedupedByPair.values()).sort((left, right) =>
       compareStrings(left.componentKey, right.componentKey)
+      || compareStrings(left.occurrenceId, right.occurrenceId)
       || compareStrings(left.vulnerabilityRef, right.vulnerabilityRef)
       || evidenceRank[left.evidence] - evidenceRank[right.evidence]
     );
 
     const componentsByVulnerability = new Map<string, RelatedComponentSummary[]>();
     const vulnerabilitiesByComponent = new Map<string, RelatedVulnerabilitySummary[]>();
+    const vulnerabilitiesByOccurrence = new Map<string, RelatedVulnerabilitySummary[]>();
 
     for (const relationship of normalizedRelationships) {
       const component = componentsByKey.get(relationship.componentKey);
+      const occurrence = occurrencesById.get(relationship.occurrenceId);
       const vulnerability = vulnerabilitiesByRef.get(relationship.vulnerabilityRef);
 
-      if (!component || !vulnerability) {
+      if (!component || !occurrence || !vulnerability) {
         continue;
       }
 
-      const relatedComponent = this.toRelatedComponentSummary(component, relationship.evidence);
+      const relatedComponent = this.toRelatedComponentSummary(component, occurrence, relationship.evidence);
       const relatedVulnerability = this.toRelatedVulnerabilitySummary(vulnerability, relationship.evidence);
 
       const componentList = componentsByVulnerability.get(relationship.vulnerabilityRef) ?? [];
@@ -104,6 +109,10 @@ export class RelationshipNormalizer {
       const vulnerabilityList = vulnerabilitiesByComponent.get(relationship.componentKey) ?? [];
       vulnerabilityList.push(relatedVulnerability);
       vulnerabilitiesByComponent.set(relationship.componentKey, vulnerabilityList);
+
+      const occurrenceVulnerabilityList = vulnerabilitiesByOccurrence.get(relationship.occurrenceId) ?? [];
+      occurrenceVulnerabilityList.push(relatedVulnerability);
+      vulnerabilitiesByOccurrence.set(relationship.occurrenceId, occurrenceVulnerabilityList);
     }
 
     for (const [key, entries] of componentsByVulnerability) {
@@ -124,10 +133,20 @@ export class RelationshipNormalizer {
       ));
     }
 
+    for (const [key, entries] of vulnerabilitiesByOccurrence) {
+      vulnerabilitiesByOccurrence.set(key, entries.sort((left, right) =>
+        evidenceRank[left.evidence] - evidenceRank[right.evidence]
+        || severityRank(right.severity) - severityRank(left.severity)
+        || compareStrings(left.source, right.source)
+        || compareStrings(left.id, right.id)
+      ));
+    }
+
     return {
       componentsByVulnerability,
       relationships: normalizedRelationships,
-      vulnerabilitiesByComponent
+      vulnerabilitiesByComponent,
+      vulnerabilitiesByOccurrence
     };
   }
 
@@ -168,7 +187,14 @@ export class RelationshipNormalizer {
   private normalizeRelationship(relationship: ComponentVulnerabilityRelationship): ComponentVulnerabilityRelationship {
     return {
       componentKey: relationship.componentKey.trim().toLowerCase(),
+      occurrenceId: relationship.occurrenceId.trim().toLowerCase(),
       evidence: relationship.evidence,
+      ...(relationship.projectId ? { projectId: relationship.projectId.trim() } : {}),
+      ...(relationship.projectName ? { projectName: relationship.projectName.trim() } : {}),
+      ...(relationship.sbomFileName ? { sbomFileName: relationship.sbomFileName.trim() } : {}),
+      ...(relationship.sbomId ? { sbomId: relationship.sbomId.trim() } : {}),
+      ...(relationship.sbomLabel ? { sbomLabel: relationship.sbomLabel.trim() } : {}),
+      ...(relationship.sourcePath ? { sourcePath: relationship.sourcePath.trim() } : {}),
       vulnerabilityId: relationship.vulnerabilityId.trim(),
       vulnerabilityRef: relationship.vulnerabilityRef.trim().toLowerCase(),
       vulnerabilitySource: relationship.vulnerabilitySource.trim()
@@ -177,12 +203,20 @@ export class RelationshipNormalizer {
 
   private toRelatedComponentSummary(
     component: TrackedComponent,
+    occurrence: ComponentOccurrence,
     evidence: ComponentVulnerabilityLinkEvidence
   ): RelatedComponentSummary {
     const summary: RelatedComponentSummary = {
       evidence,
       key: component.key,
       name: component.name,
+      occurrenceId: occurrence.id,
+      projectId: occurrence.projectId,
+      projectName: occurrence.projectName,
+      sbomFileName: occurrence.sbomFileName,
+      sbomId: occurrence.sbomId,
+      sbomLabel: occurrence.sbomLabel,
+      sourcePath: occurrence.sourcePath,
       vulnerabilityCount: component.vulnerabilityCount
     };
 

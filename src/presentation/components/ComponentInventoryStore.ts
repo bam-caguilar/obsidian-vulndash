@@ -15,10 +15,12 @@ export type ComponentSeverityFilter = 'any' | NormalizedSeverity;
 export interface ComponentInventoryFilters {
   enabledOnly: boolean;
   followedOnly: boolean;
+  projectId: string;
   searchQuery: string;
   sourceFile: string;
   sourceFormat: 'all' | NormalizedSbomFormat;
   severityThreshold: ComponentSeverityFilter;
+  sbomId: string;
   vulnerableOnly: boolean;
 }
 
@@ -30,7 +32,9 @@ export interface ComponentInventorySummary {
 }
 
 export interface ComponentInventoryDerivedState {
+  availableProjects: Array<{ id: string; name: string }>;
   availableSourceFiles: string[];
+  availableSboms: Array<{ id: string; label: string }>;
   components: ComponentInventoryDisplayEntry[];
   hasActiveFilters: boolean;
   purlMatches: ComponentPurlMatchSummary[];
@@ -119,6 +123,13 @@ const buildSearchHaystack = (entry: ComponentInventoryDisplayEntry): string =>
     entry.component.notePath ?? '',
     ...entry.component.sourceFiles,
     ...entry.component.formats,
+    ...entry.component.sources.flatMap((source) => [
+      source.projectId,
+      source.projectName,
+      source.sbomId,
+      source.sbomLabel,
+      source.sbomFileName
+    ]),
     ...entry.component.vulnerabilities.map((vulnerability) => vulnerability.id),
     ...entry.component.cweGroups.map((group) => `cwe-${group.cwe}`),
     ...entry.relatedVulnerabilities.flatMap((vulnerability) => [
@@ -147,8 +158,10 @@ const matchesSeverityThreshold = (
 export const createDefaultComponentInventoryFilters = (): ComponentInventoryFilters => ({
   enabledOnly: false,
   followedOnly: false,
+  projectId: 'all',
   searchQuery: '',
   severityThreshold: 'any',
+  sbomId: 'all',
   sourceFile: 'all',
   sourceFormat: 'all',
   vulnerableOnly: false
@@ -198,6 +211,14 @@ export const filterTrackedComponents = (
       return false;
     }
 
+    if (filters.projectId !== 'all' && !component.component.sources.some((source) => source.projectId === filters.projectId)) {
+      return false;
+    }
+
+    if (filters.sbomId !== 'all' && !component.component.sources.some((source) => source.sbomId === filters.sbomId)) {
+      return false;
+    }
+
     if (filters.sourceFile !== 'all' && !component.component.sourceFiles.includes(filters.sourceFile)) {
       return false;
     }
@@ -220,9 +241,17 @@ export const deriveComponentInventoryState = (
   const allComponents = snapshot.inventory.catalog.components.map((component) => toDisplayEntry(snapshot, component));
   const filteredComponents = filterTrackedComponents(allComponents, filters);
   const visibleComponentKeys = new Set(filteredComponents.map((entry) => entry.component.key));
+  const availableProjects = Array.from(new Map(snapshot.inventory.occurrences
+    .map((occurrence) => [occurrence.projectId, { id: occurrence.projectId, name: occurrence.projectName }] as const)).values())
+    .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+  const availableSboms = Array.from(new Map(snapshot.inventory.occurrences
+    .map((occurrence) => [occurrence.sbomId, { id: occurrence.sbomId, label: occurrence.sbomFileName }] as const)).values())
+    .sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
 
   return {
+    availableProjects,
     availableSourceFiles: snapshot.inventory.catalog.sourceFiles,
+    availableSboms,
     components: filteredComponents,
     hasActiveFilters: hasActiveComponentInventoryFilters(filters),
     purlMatches: snapshot.purlMatches.filter((match) => visibleComponentKeys.has(match.componentKey)),
@@ -235,6 +264,8 @@ export const hasActiveComponentInventoryFilters = (
 ): boolean =>
   filters.enabledOnly
   || filters.followedOnly
+  || filters.projectId !== 'all'
+  || filters.sbomId !== 'all'
   || filters.vulnerableOnly
   || filters.severityThreshold !== 'any'
   || filters.sourceFormat !== 'all'

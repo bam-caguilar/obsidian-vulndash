@@ -1,19 +1,23 @@
 import type {
-  NormalizedSbomDocument,
+  NormalizedSbomDocument
 } from '../../domain/sbom/types';
+import { UNASSIGNED_PROJECT_ID } from '../../domain/project/ProjectId';
+import { UNASSIGNED_PROJECT_NAME } from '../../domain/project/ProjectName';
 import { getSeverityRank } from '../../domain/value-objects/Severity';
 import { ComponentIdentityService } from './ComponentIdentityService';
 import { ComponentMergeService } from './ComponentMergeService';
-import type { ComponentCatalog, TrackedComponent } from './types';
+import type { CatalogComponentInput, ComponentCatalog, TrackedComponent } from './types';
 
 const normalizeToken = (value: string): string =>
   value.trim().replace(/\s+/g, ' ').toLowerCase();
 
 const compareDocuments = (
-  left: NormalizedSbomDocument,
-  right: NormalizedSbomDocument
+  left: CatalogComponentInput['document'],
+  right: CatalogComponentInput['document']
 ): number =>
   left.sourcePath.localeCompare(right.sourcePath)
+  || (left.projectName ?? '').localeCompare(right.projectName ?? '')
+  || (left.sbomFileName ?? '').localeCompare(right.sbomFileName ?? '')
   || left.format.localeCompare(right.format)
   || left.name.localeCompare(right.name);
 
@@ -31,15 +35,46 @@ const compareTrackedComponents = (
     || left.key.localeCompare(right.key);
 };
 
+type CatalogDocument = CatalogComponentInput['document'] & {
+  components: NormalizedSbomDocument['components'];
+};
+
+const getSbomFileName = (path: string): string => {
+  const normalized = path.replace(/\\/g, '/');
+  const segments = normalized.split('/').filter(Boolean);
+  return segments.at(-1) ?? normalized;
+};
+
+const toCatalogDocument = (
+  document: NormalizedSbomDocument | CatalogDocument
+): CatalogDocument => {
+  if ('projectId' in document && 'sbomId' in document && 'sbomFileName' in document) {
+    return document;
+  }
+
+  return {
+    components: document.components,
+    format: document.format,
+    name: document.name,
+    projectId: UNASSIGNED_PROJECT_ID,
+    projectName: UNASSIGNED_PROJECT_NAME,
+    sbomFileName: getSbomFileName(document.sourcePath),
+    sbomId: document.sourcePath,
+    sbomLabel: document.name,
+    sourcePath: document.sourcePath
+  };
+};
+
 export class SbomCatalogService {
   public constructor(
     private readonly identityService = new ComponentIdentityService(),
     private readonly mergeService = new ComponentMergeService()
   ) {}
 
-  public buildCatalog(documents: Iterable<NormalizedSbomDocument>): ComponentCatalog {
-    const sortedDocuments = [...documents].sort(compareDocuments);
+  public buildCatalog(documents: Iterable<NormalizedSbomDocument | CatalogDocument>): ComponentCatalog {
+    const sortedDocuments = [...documents].map((document) => toCatalogDocument(document)).sort(compareDocuments);
     const trackedComponents = new Map<string, TrackedComponent>();
+    const occurrences = new Map<string, TrackedComponent['sources'][number]>();
     const sourceFiles = new Set<string>();
     const formats = new Set<NormalizedSbomDocument['format']>();
 
@@ -59,6 +94,9 @@ export class SbomCatalogService {
           key,
           existing ? this.mergeService.mergeComponents(existing, tracked) : tracked
         );
+        for (const occurrence of tracked.sources) {
+          occurrences.set(occurrence.id, occurrence);
+        }
       }
     }
 
@@ -68,6 +106,7 @@ export class SbomCatalogService {
       componentCount: components.length,
       components,
       formats: Array.from(formats).sort((left, right) => left.localeCompare(right)),
+      occurrenceCount: occurrences.size,
       sourceFiles: Array.from(sourceFiles).sort((left, right) => left.localeCompare(right))
     };
   }

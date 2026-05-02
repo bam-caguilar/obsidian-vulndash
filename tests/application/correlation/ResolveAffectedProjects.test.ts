@@ -62,7 +62,8 @@ test('ResolveAffectedProjects deduplicates shared project notes and surfaces unm
       }]
     ]]),
     relationships: [],
-    vulnerabilitiesByComponent: new Map()
+    vulnerabilitiesByComponent: new Map(),
+    vulnerabilitiesByOccurrence: new Map()
   };
 
   const result = await resolver.execute({
@@ -99,7 +100,8 @@ test('ResolveAffectedProjects preserves broken note mappings for repair flows', 
       }]
     ]]),
     relationships: [],
-    vulnerabilitiesByComponent: new Map()
+    vulnerabilitiesByComponent: new Map(),
+    vulnerabilitiesByOccurrence: new Map()
   };
 
   const result = await resolver.execute({

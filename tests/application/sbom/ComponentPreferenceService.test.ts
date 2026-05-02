@@ -43,6 +43,7 @@ const createCatalog = (): ComponentCatalog => ({
     }
   ],
   formats: ['cyclonedx'],
+  occurrenceCount: 0,
   sourceFiles: ['reports/a.json']
 });
 

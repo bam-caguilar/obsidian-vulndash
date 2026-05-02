@@ -1,7 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SbomComponentIndex } from '../../../src/infrastructure/correlation/SbomComponentIndex';
-import type { TrackedComponent } from '../../../src/application/sbom/types';
+import type { TrackedComponent, TrackedComponentSource } from '../../../src/application/sbom/types';
+
+const createSource = (key: string, sourcePath: string, index: number): TrackedComponentSource => ({
+  componentId: `component-${index}`,
+  componentKey: key,
+  documentName: 'demo',
+  format: 'cyclonedx',
+  id: `component-occurrence::sbom-${index + 1}::component-${index}`,
+  name: key,
+  projectId: 'project::portal',
+  projectName: 'Portal',
+  sbomFileName: sourcePath.split('/').at(-1) ?? sourcePath,
+  sbomId: `sbom-${index + 1}`,
+  sbomLabel: 'demo',
+  sourcePath,
+  vulnerabilityCount: 0,
+  vulnerabilityIds: []
+});
 
 const createComponent = (key: string, sourcePaths: string[]): TrackedComponent => ({
   cweGroups: [],
@@ -11,13 +28,7 @@ const createComponent = (key: string, sourcePaths: string[]): TrackedComponent =
   key,
   name: key,
   sourceFiles: sourcePaths,
-  sources: sourcePaths.map((sourcePath, index) => ({
-    componentId: `component-${index}`,
-    documentName: 'demo',
-    format: 'cyclonedx',
-    name: key,
-    sourcePath
-  })),
+  sources: sourcePaths.map((sourcePath, index) => createSource(key, sourcePath, index)),
   vulnerabilities: [],
   vulnerabilityCount: 0
 });
