@@ -21,6 +21,12 @@ export interface ProjectAssignmentResult {
   readonly projects: readonly Project[];
 }
 
+export interface ProjectRenameResult {
+  readonly project: Project;
+  readonly projects: readonly Project[];
+  readonly sboms: readonly ImportedSbomConfig[];
+}
+
 const normalizeTimestamp = (value: string | undefined, fallback: string): string => {
   const candidate = typeof value === 'string' ? value.trim() : '';
   const timestamp = Date.parse(candidate);
@@ -161,4 +167,56 @@ export const resolveProjectDisplayName = (
 
   const normalizedSnapshot = normalizeProjectName(snapshot ?? '');
   return normalizedSnapshot || UNASSIGNED_PROJECT_NAME;
+};
+
+export const renameProject = (
+  sboms: readonly ImportedSbomConfig[],
+  projects: readonly Project[],
+  projectId: string,
+  nextName: string,
+  timestamp = DEFAULT_PROJECT_TIMESTAMP
+): ProjectRenameResult => {
+  const normalizedProjectId = projectId.trim();
+  if (!normalizedProjectId || normalizedProjectId === UNASSIGNED_PROJECT_ID) {
+    throw new Error('Unassigned Project cannot be renamed.');
+  }
+
+  const normalizedName = normalizeProjectName(nextName);
+  if (!normalizedName) {
+    throw new Error('Project name is required.');
+  }
+
+  const catalog = normalizeProjects(projects, timestamp);
+  const current = catalog.find((project) => project.id === normalizedProjectId);
+  if (!current) {
+    throw new Error(`Project ${normalizedProjectId} was not found.`);
+  }
+
+  const duplicate = catalog.find((project) =>
+    project.id !== normalizedProjectId
+    && resolveProjectId(project.name) === resolveProjectId(normalizedName));
+  if (duplicate) {
+    throw new Error(`Project "${duplicate.name}" already exists.`);
+  }
+
+  const renamedProject = createProject({
+    createdAt: current.createdAt,
+    ...(current.description ? { description: current.description } : {}),
+    id: current.id,
+    name: resolveProjectName(normalizedName),
+    updatedAt: timestamp
+  });
+
+  return {
+    project: renamedProject,
+    projects: upsertProject(catalog, renamedProject),
+    sboms: sboms.map((sbom) => (
+      sbom.projectId === normalizedProjectId
+        ? {
+          ...sbom,
+          projectNameSnapshot: renamedProject.name
+        }
+        : sbom
+    ))
+  };
 };

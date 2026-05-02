@@ -47,6 +47,7 @@ import {
 } from '../../application/settings/SettingsMigrator';
 import {
   assignProjectToSbom,
+  renameProject as renameProjectInCatalog,
   resolveProjectDisplayName,
   reconcileSbomProjects
 } from '../../application/projects/ProjectService';
@@ -214,8 +215,35 @@ export default class VulnDashPlugin extends Plugin {
     return this.settings.projects;
   }
 
+  public getProjectById(projectId: string): Project | undefined {
+    const normalizedProjectId = projectId.trim();
+    return this.settings.projects.find((project) => project.id === normalizedProjectId);
+  }
+
   public getSbomProjectDisplayName(sbom: Pick<ImportedSbomConfig, 'projectId' | 'projectNameSnapshot'>): string {
     return resolveProjectDisplayName(this.settings.projects, sbom.projectId, sbom.projectNameSnapshot);
+  }
+
+  public async reassignSbomToProject(sbomId: string, projectName: string): Promise<void> {
+    await this.updateSbomConfig(sbomId, {
+      projectId: '',
+      projectNameSnapshot: projectName
+    });
+  }
+
+  public async renameProject(projectId: string, projectName: string): Promise<void> {
+    const renamed = renameProjectInCatalog(
+      this.settings.sboms,
+      this.settings.projects,
+      projectId,
+      projectName,
+      new Date().toISOString()
+    );
+    await this.applySettings({
+      ...this.settings,
+      projects: [...renamed.projects],
+      sboms: [...renamed.sboms]
+    }, { recomputeFilters: true });
   }
 
   public listProjectNotes(): ProjectNoteOption[] {

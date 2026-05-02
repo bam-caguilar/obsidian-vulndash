@@ -14,6 +14,24 @@ const toEditableComponent = (component: ResolvedSbomComponent): EditableSbomComp
 const getComponentDisplayName = (component: EditableSbomComponent): string =>
   component.editedName?.trim() || component.normalizedName;
 
+const formatSbomFormat = (format: string | undefined): string => {
+  if (format === 'cyclonedx') {
+    return 'CycloneDX';
+  }
+
+  if (format === 'spdx') {
+    return 'SPDX';
+  }
+
+  return format?.trim() || 'Unknown';
+};
+
+const describeSbomFile = (path: string): string => {
+  const normalizedPath = path.replace(/\\/g, '/');
+  const segments = normalizedPath.split('/').filter(Boolean);
+  return segments.at(-1) ?? normalizedPath;
+};
+
 export class SbomComponentsModal extends Modal {
   private searchQuery = '';
   private renderId = 0;
@@ -50,16 +68,26 @@ export class SbomComponentsModal extends Modal {
     }
 
     const components = await this.plugin.getSbomComponents(this.sbomId);
+    const runtimeState = this.plugin.getSbomRuntimeState(this.sbomId);
     if (activeRenderId !== this.renderId) {
       return;
     }
 
+    const projectDisplayName = this.plugin.getSbomProjectDisplayName(sbom);
     const header = contentEl.createDiv({ cls: 'vulndash-modal-header' });
-    header.createEl('h2', { text: `${sbom.label}: Components` });
+    header.createEl('h2', { text: `${sbom.label}: SBOM Details` });
     header.createEl('p', {
       cls: 'vulndash-muted-copy',
-      text: 'Review runtime components, adjust the display name used for filtering, and control whether each component participates in computed filters.'
+      text: 'Review project ownership, inspect the originating SBOM file, and adjust runtime component overrides for this specific import.'
     });
+
+    const metadata = contentEl.createDiv({ cls: 'vulndash-sbom-summary-grid vulndash-sbom-details-grid' });
+    this.createMetaStat(metadata, 'Project', projectDisplayName);
+    this.createMetaStat(metadata, 'SBOM File', sbom.path ? describeSbomFile(sbom.path) : 'No file attached');
+    this.createMetaStat(metadata, 'Format', formatSbomFormat(runtimeState?.document.format));
+    this.createMetaStat(metadata, 'Imported', sbom.lastImportedAt ? new Date(sbom.lastImportedAt).toLocaleString() : 'Never');
+    this.createMetaStat(metadata, 'Components', String(components?.length ?? sbom.componentCount ?? 0));
+    this.createMetaStat(metadata, 'Mapped Project Note', sbom.linkedProjectDisplayName || sbom.linkedProjectNotePath || 'None');
 
     if (!components) {
       this.renderMessageState(contentEl, 'Unable to load components', sbom.lastError || 'The SBOM file could not be parsed into components.');
@@ -263,5 +291,11 @@ export class SbomComponentsModal extends Modal {
     const state = container.createDiv({ cls: 'vulndash-empty-state' });
     state.createEl('h3', { text: title });
     state.createEl('p', { text: body });
+  }
+
+  private createMetaStat(container: HTMLElement, label: string, value: string): void {
+    const stat = container.createDiv({ cls: 'vulndash-sbom-summary-stat' });
+    stat.createDiv({ cls: 'vulndash-sbom-summary-label', text: label });
+    stat.createDiv({ cls: 'vulndash-sbom-summary-value', text: value });
   }
 }

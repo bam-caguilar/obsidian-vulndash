@@ -669,6 +669,32 @@
   font-size: var(--font-ui-smaller);
 }
 
+.vulndash-project-name-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.vulndash-project-name-actions {
+  justify-content: flex-end;
+}
+
+.vulndash-project-quick-picks {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.vulndash-project-quick-pick-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.vulndash-sbom-details-grid .vulndash-sbom-summary-value {
+  font-size: var(--font-ui-medium);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
 /* ==========================================================================
    8. PRODUCT FILTERS
    ========================================================================== */

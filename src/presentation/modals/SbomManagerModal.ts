@@ -2,7 +2,8 @@ import { Modal, Notice, setIcon } from 'obsidian';
 import type { ProjectNoteLookupResult } from '../../application/correlation/ResolveAffectedProjects';
 import type { SbomFileChangeStatus } from '../../application/use-cases/SbomImportService';
 import type { ImportedSbomConfig } from '../../application/use-cases/types';
-import { UNASSIGNED_PROJECT_NAME } from '../../domain/project/ProjectName';
+import { UNASSIGNED_PROJECT_ID } from '../../domain/project/ProjectId';
+import { normalizeProjectName, UNASSIGNED_PROJECT_NAME } from '../../domain/project/ProjectName';
 import {
   describeSbomFileStatus,
   filterSbomsForWorkspace,
@@ -10,6 +11,7 @@ import {
 } from '../../application/use-cases/SbomWorkspaceService';
 import type VulnDashPlugin from '../plugin/VulnDashPlugin';
 import { ProjectNoteSuggestModal } from './ProjectNoteSuggestModal';
+import { ProjectNameModal } from './ProjectNameModal';
 import { SbomCompareModal } from './SbomCompareModal';
 import { SbomComponentsModal } from './SbomComponentsModal';
 import { SbomFileSuggestModal } from './SbomFileSuggestModal';
@@ -87,6 +89,7 @@ export class SbomManagerModal extends Modal {
     this.createSummaryStat(stats, 'Enabled', String(summary.enabled));
     this.createSummaryStat(stats, 'Errors', String(summary.withErrors));
     this.createSummaryStat(stats, 'Changed', String(summary.changed));
+    this.createSummaryStat(stats, 'Projects', String(this.plugin.getProjects().length));
   }
 
   private renderActionBar(container: HTMLElement, sbomCount: number): void {
@@ -97,7 +100,7 @@ export class SbomManagerModal extends Modal {
     setIcon(searchIcon, 'search');
     const searchInput = searchField.createEl('input', {
       attr: {
-        placeholder: 'Filter SBOMs by label, path, namespace, or error',
+        placeholder: 'Filter SBOMs by label, project, path, namespace, or error',
         type: 'search'
       }
     });
@@ -129,6 +132,7 @@ export class SbomManagerModal extends Modal {
     const fileStatus = describeSbomFileStatus(this.statusMap.get(sbom.id));
     const projectNoteStatus = this.projectNoteStatusMap.get(sbom.id) ?? null;
     const projectDisplayName = this.plugin.getSbomProjectDisplayName(sbom);
+    const sbomsInProjectCount = this.plugin.getSettings().sboms.filter((candidate) => candidate.projectId === sbom.projectId).length;
     const card = container.createDiv({ cls: 'vulndash-sbom-workspace-card' });
 
     const header = card.createDiv({ cls: 'vulndash-sbom-card-header' });
@@ -157,6 +161,7 @@ export class SbomManagerModal extends Modal {
     this.createMetric(metrics, 'Last sync', sbom.lastImportedAt ? new Date(sbom.lastImportedAt).toLocaleString() : 'Never');
     this.createMetric(metrics, 'Namespace', sbom.namespace || 'None');
     this.createMetric(metrics, 'Project', projectDisplayName);
+    this.createMetric(metrics, 'SBOM file', this.describeSbomFile(sbom));
 
     const filePanel = card.createDiv({ cls: 'vulndash-sbom-file-panel' });
     filePanel.createDiv({ cls: 'vulndash-sbom-file-label', text: 'SBOM file' });
@@ -180,6 +185,34 @@ export class SbomManagerModal extends Modal {
     });
 
     const projectActions = card.createDiv({ cls: 'vulndash-sbom-toolbar' });
+    this.createButton(projectActions, 'Reassign SBOM', async () => {
+      this.openProjectAssignmentModal({
+        confirmLabel: 'Reassign SBOM',
+        description: 'Move only this SBOM to another project. Other SBOMs in the current project stay unchanged.',
+        initialValue: projectDisplayName,
+        onSubmit: async (projectName) => {
+          await this.plugin.reassignSbomToProject(sbom.id, projectName);
+          new Notice(`Reassigned ${sbom.label} to ${projectName}.`);
+          this.onStateChanged?.();
+          await this.renderAsync();
+        },
+        title: `Reassign ${sbom.label}`
+      });
+    });
+    this.createButton(projectActions, 'Rename Project', async () => {
+      this.openProjectAssignmentModal({
+        confirmLabel: 'Rename Project',
+        description: `Rename the project for all ${sbomsInProjectCount} SBOM${sbomsInProjectCount === 1 ? '' : 's'} currently attached to it.`,
+        initialValue: projectDisplayName,
+        onSubmit: async (projectName) => {
+          await this.plugin.renameProject(sbom.projectId, projectName);
+          new Notice(`Renamed project to ${projectName}.`);
+          this.onStateChanged?.();
+          await this.renderAsync();
+        },
+        title: `Rename ${projectDisplayName}`
+      });
+    }, { disabled: sbom.projectId === UNASSIGNED_PROJECT_ID });
     this.createButton(projectActions, this.getProjectNoteActionLabel(sbom, projectNoteStatus), async () => {
       this.openProjectNotePicker(sbom.id);
     }, { cta: !sbom.linkedProjectNotePath });
@@ -199,7 +232,7 @@ export class SbomManagerModal extends Modal {
     this.createButton(primaryActions, sbom.path ? 'Change File' : 'Browse File', async () => {
       this.openSbomFilePicker(sbom.id);
     }, { cta: !sbom.path });
-    this.createButton(primaryActions, 'Inspect Components', async () => {
+    this.createButton(primaryActions, 'View Details', async () => {
       new SbomComponentsModal(this.plugin, sbom.id, () => {
         this.onStateChanged?.();
         void this.renderAsync();
@@ -233,21 +266,6 @@ export class SbomManagerModal extends Modal {
     const advanced = card.createEl('details', { cls: 'vulndash-sbom-advanced' });
     advanced.createEl('summary', { text: 'Details and fallback path entry' });
     const advancedGrid = advanced.createDiv({ cls: 'vulndash-sbom-advanced-grid' });
-
-    this.createBlurPersistedField(advancedGrid, {
-      initialValue: projectDisplayName,
-      label: 'Project Name',
-      onPersist: async (value) => {
-        const nextValue = value.trim() || projectDisplayName;
-        await this.plugin.updateSbomConfig(sbom.id, {
-          projectId: '',
-          projectNameSnapshot: nextValue
-        });
-        this.onStateChanged?.();
-        return this.plugin.getSbomProjectDisplayName(this.plugin.getSbomById(sbom.id) ?? sbom);
-      },
-      placeholder: 'Portal Web'
-    });
 
     this.createBlurPersistedField(advancedGrid, {
       initialValue: sbom.label,
@@ -462,15 +480,18 @@ export class SbomManagerModal extends Modal {
   }
 
   private async addSbomAndBrowse(): Promise<void> {
-    const requestedProjectName = window.prompt('Project Name', UNASSIGNED_PROJECT_NAME)?.trim();
-    if (requestedProjectName === undefined) {
-      return;
-    }
-
-    const createdSbom = await this.plugin.addSbom(requestedProjectName || UNASSIGNED_PROJECT_NAME);
-    this.onStateChanged?.();
-    await this.renderAsync();
-    this.openSbomFilePicker(createdSbom.id);
+    this.openProjectAssignmentModal({
+      confirmLabel: 'Create SBOM',
+      description: 'Assign the new SBOM to an existing project or type a new project name to create it during import.',
+      initialValue: this.plugin.getProjects().find((project) => project.id !== UNASSIGNED_PROJECT_ID)?.name ?? UNASSIGNED_PROJECT_NAME,
+      onSubmit: async (projectName) => {
+        const createdSbom = await this.plugin.addSbom(projectName);
+        this.onStateChanged?.();
+        await this.renderAsync();
+        this.openSbomFilePicker(createdSbom.id);
+      },
+      title: 'Add SBOM'
+    });
   }
 
   private describeSbomFile(sbom: ImportedSbomConfig): string {
@@ -528,6 +549,22 @@ export class SbomManagerModal extends Modal {
         await this.renderAsync();
       })();
     }).open();
+  }
+
+  private openProjectAssignmentModal(options: {
+    confirmLabel: string;
+    description: string;
+    initialValue: string;
+    onSubmit: (projectName: string) => Promise<void>;
+    title: string;
+  }): void {
+    new ProjectNameModal(this.app, {
+      confirmLabel: options.confirmLabel,
+      description: options.description,
+      initialValue: normalizeProjectName(options.initialValue) || UNASSIGNED_PROJECT_NAME,
+      projects: this.plugin.getProjects(),
+      title: options.title
+    }, options.onSubmit).open();
   }
 
   private async attachSbomFile(sbomId: string, path: string): Promise<void> {
