@@ -69,13 +69,21 @@ test('migrateLegacySettings preserves legacy SBOM data and rekeys feed cursors w
 
   assert.deepEqual(migrated.manualProductFilters, ['Portal Web']);
   assert.deepEqual(migrated.productFilters, ['Portal Web']);
+  assert.deepEqual(migrated.projects, [{
+    createdAt: '1970-01-01T00:00:00.000Z',
+    id: 'project::unassigned',
+    name: 'Unassigned Project',
+    updatedAt: '1970-01-01T00:00:00.000Z'
+  }]);
   assert.deepEqual(migrated.sboms, [{
     contentHash: '',
     enabled: true,
     id: 'legacy-sbom',
     label: 'Legacy SBOM',
     lastImportedAt: 0,
-    path: 'reports/legacy.json'
+    path: 'reports/legacy.json',
+    projectId: 'project::unassigned',
+    projectNameSnapshot: 'Unassigned Project'
   }]);
   assert.deepEqual(migrated.sbomOverrides, {
     'legacy-sbom::Portal Web': {
@@ -88,6 +96,38 @@ test('migrateLegacySettings preserves legacy SBOM data and rekeys feed cursors w
   assert.equal(migrated.sourceSyncCursor.NVD, undefined);
   assert.equal(migrated.sourceSyncCursor.GitHub, undefined);
   assert.equal(migrated.settingsVersion, SETTINGS_VERSION);
+});
+
+test('migrateLegacySettings creates project ownership records for named SBOM projects', () => {
+  const migrated = migrateLegacySettings({
+    projects: [],
+    sboms: [{
+      contentHash: 'hash-1',
+      enabled: true,
+      id: 'portal-sbom',
+      label: 'Portal Runtime',
+      lastImportedAt: 123,
+      path: 'reports/portal.json',
+      projectNameSnapshot: 'Portal Web'
+    }]
+  });
+
+  assert.deepEqual(migrated.projects, [
+    {
+      createdAt: '1970-01-01T00:00:00.000Z',
+      id: 'project::portal-web',
+      name: 'Portal Web',
+      updatedAt: '1970-01-01T00:00:00.000Z'
+    },
+    {
+      createdAt: '1970-01-01T00:00:00.000Z',
+      id: 'project::unassigned',
+      name: 'Unassigned Project',
+      updatedAt: '1970-01-01T00:00:00.000Z'
+    }
+  ]);
+  assert.equal(migrated.sboms[0]?.projectId, 'project::portal-web');
+  assert.equal(migrated.sboms[0]?.projectNameSnapshot, 'Portal Web');
 });
 
 test('migrateLegacySettings normalizes invalid OSV feed values predictably', () => {

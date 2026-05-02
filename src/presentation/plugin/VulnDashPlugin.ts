@@ -45,6 +45,11 @@ import {
   normalizeSbomOverride,
   type SettingsMigrationInput
 } from '../../application/settings/SettingsMigrator';
+import {
+  assignProjectToSbom,
+  resolveProjectDisplayName,
+  reconcileSbomProjects
+} from '../../application/projects/ProjectService';
 import type {
   ImportedSbomConfig,
   ResolvedSbomComponent,
@@ -65,6 +70,8 @@ import { buildTriageCorrelationKeyForVulnerability } from '../../domain/triage/T
 import type { TriageRecord } from '../../domain/triage/TriageRecord';
 import { DEFAULT_TRIAGE_STATE, type TriageState } from '../../domain/triage/TriageState';
 import type { Vulnerability } from '../../domain/entities/Vulnerability';
+import type { Project } from '../../domain/project/Project';
+import { UNASSIGNED_PROJECT_NAME } from '../../domain/project/ProjectName';
 import { VULNDASH_VIEW_TYPE, VulnDashView } from '../views/VulnDashView';
 import { GenerateDailyRollupCommand } from '../commands/GenerateDailyRollupCommand';
 import { VulnDashSettingTab } from '../settings/VulnDashSettingsTab';
@@ -85,7 +92,9 @@ const createEmptySbomConfig = (index: number): ImportedSbomConfig => ({
   id: `sbom-${Date.now()}-${index + 1}`,
   label: `SBOM ${index + 1}`,
   lastImportedAt: 0,
-  path: ''
+  path: '',
+  projectId: '',
+  projectNameSnapshot: ''
 });
 
 type LoadedPluginData = SettingsMigrationInput;
@@ -195,6 +204,14 @@ export default class VulnDashPlugin extends Plugin {
     return this.settings;
   }
 
+  public getProjects(): readonly Project[] {
+    return this.settings.projects;
+  }
+
+  public getSbomProjectDisplayName(sbom: Pick<ImportedSbomConfig, 'projectId' | 'projectNameSnapshot'>): string {
+    return resolveProjectDisplayName(this.settings.projects, sbom.projectId, sbom.projectNameSnapshot);
+  }
+
   public listProjectNotes(): ProjectNoteOption[] {
     return this.getAppModule().listProjectNotes();
   }
@@ -241,11 +258,19 @@ export default class VulnDashPlugin extends Plugin {
     new Notice('Legacy SBOM import has been retired. Configure SBOM entries under the multi-SBOM management flow.');
   }
 
-  public async addSbom(): Promise<ImportedSbomConfig> {
+  public async addSbom(projectName = UNASSIGNED_PROJECT_NAME): Promise<ImportedSbomConfig> {
     const createdSbom = createEmptySbomConfig(this.settings.sboms.length);
-    const nextSboms = [...this.settings.sboms, createdSbom];
-    await this.applySettings({ ...this.settings, sboms: nextSboms });
-    return createdSbom;
+    const assignment = assignProjectToSbom({
+      ...createdSbom,
+      projectNameSnapshot: projectName
+    }, this.settings.projects, new Date().toISOString());
+    const nextSboms = [...this.settings.sboms, assignment.sbom];
+    await this.applySettings({
+      ...this.settings,
+      projects: [...assignment.projects],
+      sboms: nextSboms
+    });
+    return assignment.sbom;
   }
 
   public async removeSbom(sbomId: string): Promise<void> {
@@ -276,13 +301,18 @@ export default class VulnDashPlugin extends Plugin {
         }, index)
         : sbom
     ));
+    const reconciled = reconcileSbomProjects(nextSboms, this.settings.projects, new Date().toISOString());
 
     if (typeof updates.path === 'string' && normalizePath(updates.path || '') !== normalizePath(current.path || '')) {
       this.getAppModule().invalidateSbomCache(sbomId);
     }
 
-    const shouldRecompute = updates.enabled !== undefined || updates.path !== undefined;
-    await this.applySettings({ ...this.settings, sboms: nextSboms }, { recomputeFilters: shouldRecompute });
+    const shouldRecompute = updates.enabled !== undefined || updates.path !== undefined || updates.projectId !== undefined || updates.projectNameSnapshot !== undefined;
+    await this.applySettings({
+      ...this.settings,
+      projects: [...reconciled.projects],
+      sboms: [...reconciled.sboms]
+    }, { recomputeFilters: shouldRecompute });
   }
 
   public async updateSbomComponentOverride(
@@ -832,10 +862,13 @@ export default class VulnDashPlugin extends Plugin {
 
   private applySbomLoadResults(settings: VulnDashSettings, results: SbomLoadResult[]): VulnDashSettings {
     const resultMap = new Map(results.map((result) => [result.sbomId, result] as const));
+    const nextSboms = settings.sboms.map((sbom, index) => this.applySbomLoadResultToConfig(sbom, resultMap.get(sbom.id) ?? null, index));
+    const reconciled = reconcileSbomProjects(nextSboms, settings.projects);
 
     return {
       ...settings,
-      sboms: settings.sboms.map((sbom, index) => this.applySbomLoadResultToConfig(sbom, resultMap.get(sbom.id) ?? null, index))
+      projects: [...reconciled.projects],
+      sboms: [...reconciled.sboms]
     };
   }
 

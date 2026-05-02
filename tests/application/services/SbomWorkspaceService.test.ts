@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { ImportedSbomConfig } from '../../../src/application/use-cases/types';
 import {
   describeSbomFileStatus,
+  filterSbomsForWorkspace,
   filterSbomComparisonResult,
   sortSbomFileCandidates,
   summarizeSbomWorkspace
@@ -15,6 +16,8 @@ const createSbom = (overrides: Partial<ImportedSbomConfig> = {}): ImportedSbomCo
   label: 'Primary SBOM',
   lastImportedAt: 0,
   path: 'reports/sbom.json',
+  projectId: 'project::unassigned',
+  projectNameSnapshot: 'Unassigned Project',
   ...overrides
 });
 
@@ -66,6 +69,20 @@ test('filters comparison results in memory without changing the underlying group
     onlyInA: [],
     onlyInB: []
   });
+});
+
+test('workspace search includes assigned project names', () => {
+  const filtered = filterSbomsForWorkspace([
+    createSbom({ projectId: 'project::portal-web', projectNameSnapshot: 'Portal Web' }),
+    createSbom({
+      id: 'sbom-2',
+      label: 'Identity SBOM',
+      projectId: 'project::identity-api',
+      projectNameSnapshot: 'Identity API'
+    })
+  ], 'identity');
+
+  assert.deepEqual(filtered.map((sbom: ImportedSbomConfig) => sbom.id), ['sbom-2']);
 });
 
 test('maps file change states to user-facing badge copy', () => {

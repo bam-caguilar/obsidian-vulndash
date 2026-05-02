@@ -38,7 +38,7 @@ test('project names preserve display casing while project ids normalize determin
 
 test('project ids collapse punctuation and diacritics into stable slugs', () => {
   assert.equal(normalizeProjectSlug('Payments / Service API'), 'payments-service-api');
-  assert.equal(createProjectId('Café Identity API'), 'project::cafe-identity-api');
+  assert.equal(createProjectId('Caf\u00E9 Identity API'), 'project::cafe-identity-api');
 });
 
 test('empty project names are rejected unless explicitly resolved to the unassigned project', () => {

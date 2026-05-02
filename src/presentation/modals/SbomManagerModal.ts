@@ -2,6 +2,7 @@ import { Modal, Notice, setIcon } from 'obsidian';
 import type { ProjectNoteLookupResult } from '../../application/correlation/ResolveAffectedProjects';
 import type { SbomFileChangeStatus } from '../../application/use-cases/SbomImportService';
 import type { ImportedSbomConfig } from '../../application/use-cases/types';
+import { UNASSIGNED_PROJECT_NAME } from '../../domain/project/ProjectName';
 import {
   describeSbomFileStatus,
   filterSbomsForWorkspace,
@@ -127,6 +128,7 @@ export class SbomManagerModal extends Modal {
   private renderSbomCard(container: HTMLElement, sbom: ImportedSbomConfig): void {
     const fileStatus = describeSbomFileStatus(this.statusMap.get(sbom.id));
     const projectNoteStatus = this.projectNoteStatusMap.get(sbom.id) ?? null;
+    const projectDisplayName = this.plugin.getSbomProjectDisplayName(sbom);
     const card = container.createDiv({ cls: 'vulndash-sbom-workspace-card' });
 
     const header = card.createDiv({ cls: 'vulndash-sbom-card-header' });
@@ -154,12 +156,20 @@ export class SbomManagerModal extends Modal {
     this.createMetric(metrics, 'Components', String(sbom.componentCount ?? 0));
     this.createMetric(metrics, 'Last sync', sbom.lastImportedAt ? new Date(sbom.lastImportedAt).toLocaleString() : 'Never');
     this.createMetric(metrics, 'Namespace', sbom.namespace || 'None');
+    this.createMetric(metrics, 'Project', projectDisplayName);
 
     const filePanel = card.createDiv({ cls: 'vulndash-sbom-file-panel' });
-    filePanel.createDiv({ cls: 'vulndash-sbom-file-label', text: sbom.path ? 'Selected file' : 'File selection' });
+    filePanel.createDiv({ cls: 'vulndash-sbom-file-label', text: 'SBOM file' });
     filePanel.createDiv({
       cls: sbom.path ? 'vulndash-sbom-file-path' : 'vulndash-sbom-file-path is-empty',
-      text: sbom.path || 'Choose a vault JSON file to connect this SBOM entry.'
+      text: this.describeSbomFile(sbom)
+    });
+
+    const projectOwnershipPanel = card.createDiv({ cls: 'vulndash-sbom-file-panel' });
+    projectOwnershipPanel.createDiv({ cls: 'vulndash-sbom-file-label', text: 'Assigned project' });
+    projectOwnershipPanel.createDiv({
+      cls: 'vulndash-sbom-file-path',
+      text: projectDisplayName
     });
 
     const projectPanel = card.createDiv({ cls: 'vulndash-sbom-file-panel' });
@@ -225,8 +235,23 @@ export class SbomManagerModal extends Modal {
     const advancedGrid = advanced.createDiv({ cls: 'vulndash-sbom-advanced-grid' });
 
     this.createBlurPersistedField(advancedGrid, {
+      initialValue: projectDisplayName,
+      label: 'Project Name',
+      onPersist: async (value) => {
+        const nextValue = value.trim() || projectDisplayName;
+        await this.plugin.updateSbomConfig(sbom.id, {
+          projectId: '',
+          projectNameSnapshot: nextValue
+        });
+        this.onStateChanged?.();
+        return this.plugin.getSbomProjectDisplayName(this.plugin.getSbomById(sbom.id) ?? sbom);
+      },
+      placeholder: 'Portal Web'
+    });
+
+    this.createBlurPersistedField(advancedGrid, {
       initialValue: sbom.label,
-      label: 'Project label',
+      label: 'SBOM Label',
       onPersist: async (value) => {
         const nextValue = value.trim() || sbom.label;
         await this.plugin.updateSbomConfig(sbom.id, { label: nextValue });
@@ -437,10 +462,25 @@ export class SbomManagerModal extends Modal {
   }
 
   private async addSbomAndBrowse(): Promise<void> {
-    const createdSbom = await this.plugin.addSbom();
+    const requestedProjectName = window.prompt('Project Name', UNASSIGNED_PROJECT_NAME)?.trim();
+    if (requestedProjectName === undefined) {
+      return;
+    }
+
+    const createdSbom = await this.plugin.addSbom(requestedProjectName || UNASSIGNED_PROJECT_NAME);
     this.onStateChanged?.();
     await this.renderAsync();
     this.openSbomFilePicker(createdSbom.id);
+  }
+
+  private describeSbomFile(sbom: ImportedSbomConfig): string {
+    if (!sbom.path) {
+      return 'Choose a vault JSON file to connect this SBOM entry.';
+    }
+
+    const normalizedPath = sbom.path.replace(/\\/g, '/');
+    const segments = normalizedPath.split('/').filter(Boolean);
+    return segments.at(-1) ?? normalizedPath;
   }
 
   private openSbomFilePicker(sbomId: string): void {

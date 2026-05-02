@@ -24,6 +24,7 @@ const getSearchableSbomText = (sbom: ImportedSbomConfig): string =>
   [
     sbom.label,
     sbom.path,
+    sbom.projectNameSnapshot,
     sbom.namespace ?? '',
     sbom.lastError ?? ''
   ].join(' ').toLowerCase();

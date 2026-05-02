@@ -29,7 +29,9 @@ const createSbomConfig = (): ImportedSbomConfig => ({
   id: 'sbom-1',
   label: 'Primary SBOM',
   lastImportedAt: 0,
-  path: 'reports/application.spdx.json'
+  path: 'reports/application.spdx.json',
+  projectId: 'project::unassigned',
+  projectNameSnapshot: 'Unassigned Project'
 });
 
 test('SbomImportService parses through the configured parser factory', async () => {

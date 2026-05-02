@@ -1,7 +1,9 @@
 import { BUILT_IN_FEEDS, FEED_TYPES } from '../../domain/feeds/FeedTypes';
 import type { TriageState } from '../../domain/triage/TriageState';
 import { ProductNameNormalizer } from '../../domain/services/ProductNameNormalizer';
+import type { Project } from '../../domain/project/Project';
 import type { LegacyPersistedPluginData } from '../../infrastructure/storage/LegacyDataMigration';
+import { normalizeProjects, reconcileSbomProjects } from '../projects/ProjectService';
 import { ComponentPreferenceService } from '../sbom/ComponentPreferenceService';
 import { normalizeTriageFilterMode } from '../triage/FilterByTriageState';
 import {
@@ -41,10 +43,11 @@ export interface LegacyImportedSbomConfig extends Partial<ImportedSbomConfig> {
   lastImportHash?: unknown;
 }
 
-export type SettingsMigrationInput = LegacyPersistedPluginData & Partial<VulnDashSettings> & {
+export type SettingsMigrationInput = LegacyPersistedPluginData & Omit<Partial<VulnDashSettings>, 'projects' | 'sboms'> & {
   autoHighNoteCreationEnabled?: unknown;
   autoNoteCreationEnabled?: unknown;
   autoNoteFolder?: unknown;
+  projects?: Partial<Project>[];
   sboms?: LegacyImportedSbomConfig[];
 };
 
@@ -168,7 +171,9 @@ export const normalizeImportedSbomConfig = (
     id: getTrimmedString(sbom.id) || `sbom-${index + 1}`,
     label: getTrimmedString(sbom.label) || buildLegacySbomLabel(getTrimmedString(sbom.path)),
     lastImportedAt,
-    path: getTrimmedString(sbom.path) ? normalizeStoredPath(getTrimmedString(sbom.path)) : ''
+    path: getTrimmedString(sbom.path) ? normalizeStoredPath(getTrimmedString(sbom.path)) : '',
+    projectId: getTrimmedString(sbom.projectId),
+    projectNameSnapshot: getTrimmedString(sbom.projectNameSnapshot)
   };
 
   if (namespace) {
@@ -198,7 +203,9 @@ const createLegacySbomConfig = (path: string): ImportedSbomConfig => {
     id: 'sbom-1',
     label: buildLegacySbomLabel(normalizedPath),
     lastImportedAt: 0,
-    path: normalizedPath
+    path: normalizedPath,
+    projectId: '',
+    projectNameSnapshot: ''
   };
 };
 
@@ -376,17 +383,20 @@ const migrateLegacyProductFilters = (settings: SettingsMigrationInput): Pick<Vul
 
 const migrateLegacySbomSettings = (
   settings: SettingsMigrationInput
-): Pick<VulnDashSettings, 'sbomOverrides' | 'sbomPath' | 'sboms'> => {
+): Pick<VulnDashSettings, 'projects' | 'sbomOverrides' | 'sbomPath' | 'sboms'> => {
   const rawSboms = Array.isArray(settings.sboms) ? settings.sboms : [];
-  const sboms = rawSboms.length > 0
+  const normalizedSboms = rawSboms.length > 0
     ? rawSboms.map((sbom, index) => normalizeImportedSbomConfig(sbom, index))
     : (settings.sbomPath?.trim()
       ? [createLegacySbomConfig(settings.sbomPath)]
       : []);
+  const projectCatalog = normalizeProjects(settings.projects);
+  const { projects, sboms } = reconcileSbomProjects(normalizedSboms, projectCatalog);
   const migratedOverrides = migrateLegacySbomOverrides(rawSboms);
 
   return {
-    sboms,
+    projects: [...projects],
+    sboms: [...sboms],
     sbomOverrides: normalizeSbomOverrides({
       ...migratedOverrides,
       ...(settings.sbomOverrides ?? {})
@@ -402,7 +412,15 @@ const normalizeRuntimeSettingsInternal = (settings: VulnDashSettings): VulnDashS
   productFilters: normalizeStringList(settings.productFilters),
   feeds: normalizeFeedConfigs(settings.feeds),
   sbomFolders: normalizePathList(settings.sbomFolders),
-  sboms: settings.sboms.map((sbom, index) => normalizeImportedSbomConfig(sbom, index)),
+  ...(() => {
+    const projectCatalog = normalizeProjects(settings.projects);
+    const sbomConfigs = settings.sboms.map((sbom, index) => normalizeImportedSbomConfig(sbom, index));
+    const reconciled = reconcileSbomProjects(sbomConfigs, projectCatalog);
+    return {
+      projects: [...reconciled.projects],
+      sboms: [...reconciled.sboms]
+    };
+  })(),
   sbomOverrides: normalizeSbomOverrides(settings.sbomOverrides),
   dashboardDateField: settings.dashboardDateField === 'published' ? 'published' : 'modified',
   triageFilter: normalizeTriageFilterMode(settings.triageFilter),
@@ -419,6 +437,7 @@ const buildNormalizedSettings = (settings: SettingsMigrationInput): VulnDashSett
   return normalizeRuntimeSettingsInternal({
     ...DEFAULT_SETTINGS,
     ...settings,
+    projects: migratedSbomSettings.projects,
     dailyRollup: normalizeDailyRollupSettings(settings.dailyRollup, settings),
     feeds: defaultedFeeds,
     sourceSyncCursor: migrateLegacySourceSyncCursor(settings.sourceSyncCursor),
@@ -501,6 +520,18 @@ const defaultMigrationSteps: readonly SettingsMigrationStep[] = [
     migrate: (settings) => ({
       ...settings,
       feeds: normalizeFeedConfigs(settings.feeds)
+    })
+  },
+  {
+    name: 'project-owned-sboms',
+    toVersion: 11,
+    shouldApply: (settings) =>
+      (settings.settingsVersion ?? 0) < 11
+      || !Array.isArray(settings.projects)
+      || settings.sboms?.some((sbom) => !getTrimmedString(sbom.projectId) || !getTrimmedString(sbom.projectNameSnapshot)) === true,
+    migrate: (settings) => ({
+      ...settings,
+      ...migrateLegacySbomSettings(settings)
     })
   }
 ];
