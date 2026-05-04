@@ -41,6 +41,48 @@ test('assignProjectToSbom attaches an sbom to an existing project by name', () =
   assert.equal(assignment.sbom.projectNameSnapshot, 'Portal Web');
 });
 
+test('assignProjectToSbom creates a new project when the imported sbom uses a new project name', () => {
+  const assignment = assignProjectToSbom(createSbom({
+    projectId: '',
+    projectNameSnapshot: 'Payments Service'
+  }), [], TIMESTAMP);
+
+  assert.equal(assignment.project.id, 'project::payments-service');
+  assert.equal(assignment.project.name, 'Payments Service');
+  assert.equal(assignment.sbom.projectId, 'project::payments-service');
+  assert.equal(assignment.sbom.projectNameSnapshot, 'Payments Service');
+  assert.deepEqual(
+    assignment.projects.map((project) => project.id),
+    ['project::payments-service', 'project::unassigned']
+  );
+});
+
+test('assignProjectToSbom reassigns an sbom to another existing project by stable project id', () => {
+  const projects = normalizeProjects([
+    {
+      createdAt: TIMESTAMP,
+      id: 'project::portal-web',
+      name: 'Portal Web',
+      updatedAt: TIMESTAMP
+    },
+    {
+      createdAt: TIMESTAMP,
+      id: 'project::identity-api',
+      name: 'Identity API',
+      updatedAt: TIMESTAMP
+    }
+  ], TIMESTAMP);
+
+  const assignment = assignProjectToSbom(createSbom({
+    projectId: 'project::identity-api',
+    projectNameSnapshot: 'Identity API'
+  }), projects, TIMESTAMP);
+
+  assert.equal(assignment.project.id, 'project::identity-api');
+  assert.equal(assignment.sbom.projectId, 'project::identity-api');
+  assert.equal(assignment.sbom.projectNameSnapshot, 'Identity API');
+});
+
 test('renameProject updates the project catalog and all attached sbom snapshots', () => {
   const projects = normalizeProjects([{
     createdAt: '2026-04-01T00:00:00.000Z',
@@ -98,5 +140,12 @@ test('renameProject rejects duplicate target names', () => {
   assert.throws(
     () => renameProject([], projects, 'project::portal-web', 'Identity API', TIMESTAMP),
     /already exists/i
+  );
+});
+
+test('renameProject rejects renaming the unassigned project bucket', () => {
+  assert.throws(
+    () => renameProject([], [], UNASSIGNED_PROJECT_ID, 'Legacy Systems', TIMESTAMP),
+    /cannot be renamed/i
   );
 });
