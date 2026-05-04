@@ -7,7 +7,8 @@ import type {
   ComponentPurlMatchSummary,
   ComponentInventoryWorkspaceSnapshot,
   RelatedVulnerabilitySummary,
-  TrackedComponent
+  TrackedComponent,
+  TrackedComponentSource
 } from '../../application/sbom/types';
 
 export type ComponentSeverityFilter = 'any' | NormalizedSeverity;
@@ -45,6 +46,7 @@ export interface ComponentInventoryDisplayEntry {
   component: TrackedComponent;
   highestSeverity: NormalizedSeverity | undefined;
   relatedVulnerabilities: readonly RelatedVulnerabilitySummary[];
+  visibleSources: readonly TrackedComponentSource[];
   vulnerabilityCount: number;
 }
 
@@ -72,13 +74,13 @@ const severityFromRelatedVulnerability = (
 };
 
 const getUniqueVulnerabilityCount = (
-  component: TrackedComponent,
+  vulnerabilityIds: readonly string[],
   relatedVulnerabilities: readonly RelatedVulnerabilitySummary[]
 ): number => {
   const identifiers = new Set<string>();
 
-  for (const vulnerability of component.vulnerabilities) {
-    identifiers.add(normalizeToken(vulnerability.id));
+  for (const vulnerabilityId of vulnerabilityIds) {
+    identifiers.add(normalizeToken(vulnerabilityId));
   }
 
   for (const vulnerability of relatedVulnerabilities) {
@@ -89,25 +91,127 @@ const getUniqueVulnerabilityCount = (
 };
 
 const getEffectiveHighestSeverity = (
-  component: TrackedComponent,
+  severities: ReadonlyArray<NormalizedSeverity | undefined>,
   relatedVulnerabilities: readonly RelatedVulnerabilitySummary[]
 ): NormalizedSeverity | undefined =>
   getHighestSeverity([
-    component.highestSeverity,
+    ...severities,
     ...relatedVulnerabilities.map((vulnerability) => severityFromRelatedVulnerability(vulnerability))
   ]);
 
+const matchesSourceScope = (
+  source: TrackedComponentSource,
+  filters: Pick<ComponentInventoryFilters, 'projectId' | 'sbomId' | 'sourceFile' | 'sourceFormat'>
+): boolean => {
+  if (filters.sourceFormat !== 'all' && source.format !== filters.sourceFormat) {
+    return false;
+  }
+
+  if (filters.projectId !== 'all' && source.projectId !== filters.projectId) {
+    return false;
+  }
+
+  if (filters.sbomId !== 'all' && source.sbomId !== filters.sbomId) {
+    return false;
+  }
+
+  if (filters.sourceFile !== 'all' && source.sourcePath !== filters.sourceFile) {
+    return false;
+  }
+
+  return true;
+};
+
+const hasScopedSourceFilters = (
+  filters: Pick<ComponentInventoryFilters, 'projectId' | 'sbomId' | 'sourceFile' | 'sourceFormat'>
+): boolean =>
+  filters.projectId !== 'all'
+  || filters.sbomId !== 'all'
+  || filters.sourceFile !== 'all'
+  || filters.sourceFormat !== 'all';
+
+const getVisibleSources = (
+  component: TrackedComponent,
+  filters: Pick<ComponentInventoryFilters, 'projectId' | 'sbomId' | 'sourceFile' | 'sourceFormat'>
+): readonly TrackedComponentSource[] => {
+  if (!hasScopedSourceFilters(filters)) {
+    return component.sources;
+  }
+
+  return component.sources.filter((source) => matchesSourceScope(source, filters));
+};
+
+const getScopedEmbeddedVulnerabilities = (
+  component: TrackedComponent,
+  sources: readonly TrackedComponentSource[]
+): ReadonlyArray<TrackedComponent['vulnerabilities'][number]> => {
+  const visibleVulnerabilityIds = new Set(
+    sources.flatMap((source) => source.vulnerabilityIds.map((vulnerabilityId) => normalizeToken(vulnerabilityId)))
+  );
+  if (visibleVulnerabilityIds.size === 0) {
+    return [];
+  }
+
+  return component.vulnerabilities.filter((vulnerability) => visibleVulnerabilityIds.has(normalizeToken(vulnerability.id)));
+};
+
+const getScopedRelatedVulnerabilities = (
+  snapshot: ComponentInventoryWorkspaceSnapshot,
+  component: TrackedComponent,
+  sources: readonly TrackedComponentSource[]
+): readonly RelatedVulnerabilitySummary[] => {
+  const deduped = new Map<string, RelatedVulnerabilitySummary>();
+  let hasOccurrenceMappings = false;
+
+  for (const source of sources) {
+    if (snapshot.relationships.vulnerabilitiesByOccurrence.has(source.id)) {
+      hasOccurrenceMappings = true;
+    }
+    const related = snapshot.relationships.vulnerabilitiesByOccurrence.get(source.id) ?? [];
+    for (const vulnerability of related) {
+      const key = `${normalizeToken(vulnerability.source)}::${normalizeToken(vulnerability.id)}`;
+      if (!deduped.has(key)) {
+        deduped.set(key, vulnerability);
+      }
+    }
+  }
+
+  if (!hasOccurrenceMappings) {
+    for (const vulnerability of snapshot.relationships.vulnerabilitiesByComponent.get(component.key) ?? []) {
+      const key = `${normalizeToken(vulnerability.source)}::${normalizeToken(vulnerability.id)}`;
+      if (!deduped.has(key)) {
+        deduped.set(key, vulnerability);
+      }
+    }
+  }
+
+  return Array.from(deduped.values());
+};
+
 const toDisplayEntry = (
   snapshot: ComponentInventoryWorkspaceSnapshot,
-  component: TrackedComponent
+  component: TrackedComponent,
+  filters: Pick<ComponentInventoryFilters, 'projectId' | 'sbomId' | 'sourceFile' | 'sourceFormat'>
 ): ComponentInventoryDisplayEntry => {
-  const relatedVulnerabilities = snapshot.relationships.vulnerabilitiesByComponent.get(component.key) ?? [];
+  const visibleSources = getVisibleSources(component, filters);
+  const embeddedVulnerabilities = getScopedEmbeddedVulnerabilities(component, visibleSources);
+  const relatedVulnerabilities = getScopedRelatedVulnerabilities(snapshot, component, visibleSources);
 
   return {
     component,
-    highestSeverity: getEffectiveHighestSeverity(component, relatedVulnerabilities),
+    highestSeverity: getEffectiveHighestSeverity(
+      [
+        ...embeddedVulnerabilities.map((vulnerability) => vulnerability.severity),
+        visibleSources.length === component.sources.length ? component.highestSeverity : undefined
+      ],
+      relatedVulnerabilities
+    ),
     relatedVulnerabilities,
-    vulnerabilityCount: getUniqueVulnerabilityCount(component, relatedVulnerabilities)
+    visibleSources,
+    vulnerabilityCount: getUniqueVulnerabilityCount(
+      embeddedVulnerabilities.map((vulnerability) => vulnerability.id),
+      relatedVulnerabilities
+    )
   };
 };
 
@@ -123,7 +227,7 @@ const buildSearchHaystack = (entry: ComponentInventoryDisplayEntry): string =>
     entry.component.notePath ?? '',
     ...entry.component.sourceFiles,
     ...entry.component.formats,
-    ...entry.component.sources.flatMap((source) => [
+    ...entry.visibleSources.flatMap((source) => [
       source.projectId,
       source.projectName,
       source.sbomId,
@@ -207,19 +311,7 @@ export const filterTrackedComponents = (
       return false;
     }
 
-    if (filters.sourceFormat !== 'all' && !component.component.formats.includes(filters.sourceFormat)) {
-      return false;
-    }
-
-    if (filters.projectId !== 'all' && !component.component.sources.some((source) => source.projectId === filters.projectId)) {
-      return false;
-    }
-
-    if (filters.sbomId !== 'all' && !component.component.sources.some((source) => source.sbomId === filters.sbomId)) {
-      return false;
-    }
-
-    if (filters.sourceFile !== 'all' && !component.component.sourceFiles.includes(filters.sourceFile)) {
+    if (getVisibleSources(component.component, filters).length === 0) {
       return false;
     }
 
@@ -238,19 +330,41 @@ export const deriveComponentInventoryState = (
   snapshot: ComponentInventoryWorkspaceSnapshot,
   filters: ComponentInventoryFilters
 ): ComponentInventoryDerivedState => {
-  const allComponents = snapshot.inventory.catalog.components.map((component) => toDisplayEntry(snapshot, component));
-  const filteredComponents = filterTrackedComponents(allComponents, filters);
+  const unscopedFilters = createDefaultComponentInventoryFilters();
+  const sbomOptionScope = {
+    projectId: filters.projectId,
+    sbomId: 'all',
+    sourceFile: 'all',
+    sourceFormat: filters.sourceFormat
+  } satisfies Pick<ComponentInventoryFilters, 'projectId' | 'sbomId' | 'sourceFile' | 'sourceFormat'>;
+  const sourceFileOptionScope = {
+    projectId: filters.projectId,
+    sbomId: filters.sbomId,
+    sourceFile: 'all',
+    sourceFormat: filters.sourceFormat
+  } satisfies Pick<ComponentInventoryFilters, 'projectId' | 'sbomId' | 'sourceFile' | 'sourceFormat'>;
+  const allComponents = snapshot.inventory.catalog.components.map((component) =>
+    toDisplayEntry(snapshot, component, unscopedFilters)
+  );
+  const filteredComponents = filterTrackedComponents(allComponents, filters)
+    .map((entry) => toDisplayEntry(snapshot, entry.component, filters));
   const visibleComponentKeys = new Set(filteredComponents.map((entry) => entry.component.key));
   const availableProjects = Array.from(new Map(snapshot.inventory.occurrences
     .map((occurrence) => [occurrence.projectId, { id: occurrence.projectId, name: occurrence.projectName }] as const)).values())
     .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
   const availableSboms = Array.from(new Map(snapshot.inventory.occurrences
+    .filter((occurrence) => matchesSourceScope(occurrence, sbomOptionScope))
     .map((occurrence) => [occurrence.sbomId, { id: occurrence.sbomId, label: occurrence.sbomFileName }] as const)).values())
     .sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
+  const availableSourceFiles = Array.from(new Set(snapshot.inventory.occurrences
+    .filter((occurrence) => matchesSourceScope(occurrence, sourceFileOptionScope))
+    .map((occurrence) => occurrence.sourcePath)
+    .filter((sourcePath): sourcePath is string => Boolean(sourcePath))))
+    .sort((left, right) => left.localeCompare(right));
 
   return {
     availableProjects,
-    availableSourceFiles: snapshot.inventory.catalog.sourceFiles,
+    availableSourceFiles,
     availableSboms,
     components: filteredComponents,
     hasActiveFilters: hasActiveComponentInventoryFilters(filters),

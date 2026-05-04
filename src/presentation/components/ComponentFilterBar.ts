@@ -6,7 +6,9 @@ import type {
 
 export interface ComponentFilterBarState {
   availableFormats: readonly NormalizedSbomFormat[];
+  availableProjects: ReadonlyArray<{ id: string; name: string }>;
   availableSourceFiles: readonly string[];
+  availableSboms: ReadonlyArray<{ id: string; label: string }>;
   filters: ComponentInventoryFilters;
 }
 
@@ -43,7 +45,7 @@ export class ComponentFilterBar {
     searchField.createEl('label', { text: 'Search components' });
     const searchInput = searchField.createEl('input', {
       attr: {
-        placeholder: 'Search name, version, purl, cpe, CVE, supplier, or file',
+        placeholder: 'Search name, version, purl, cpe, CVE, supplier, project, or SBOM file',
         type: 'search'
       }
     });
@@ -76,6 +78,36 @@ export class ComponentFilterBar {
     );
     this.createSelect(
       controls,
+      'Project',
+      [
+        { label: 'All Projects', value: 'all' },
+        ...state.availableProjects.map((project) => ({
+          label: project.name,
+          value: project.id
+        }))
+      ],
+      state.filters.projectId,
+      (value) => {
+        this.emitChange(state.filters, { projectId: value, sbomId: 'all', sourceFile: 'all' });
+      }
+    );
+    this.createSelect(
+      controls,
+      'SBOM',
+      [
+        { label: 'All SBOMs', value: 'all' },
+        ...state.availableSboms.map((sbom) => ({
+          label: sbom.label,
+          value: sbom.id
+        }))
+      ],
+      state.filters.sbomId,
+      (value) => {
+        this.emitChange(state.filters, { sbomId: value, sourceFile: 'all' });
+      }
+    );
+    this.createSelect(
+      controls,
       'Format',
       [
         { label: 'All Formats', value: 'all' },
@@ -87,6 +119,7 @@ export class ComponentFilterBar {
       state.filters.sourceFormat,
       (value) => {
         this.emitChange(state.filters, {
+          sourceFile: 'all',
           sourceFormat: value as ComponentInventoryFilters['sourceFormat']
         });
       }
@@ -169,6 +202,8 @@ export class ComponentFilterBar {
   private hasActiveFilters(filters: ComponentInventoryFilters): boolean {
     return filters.followedOnly
       || filters.enabledOnly
+      || filters.projectId !== 'all'
+      || filters.sbomId !== 'all'
       || filters.vulnerableOnly
       || filters.severityThreshold !== 'any'
       || filters.sourceFormat !== 'all'

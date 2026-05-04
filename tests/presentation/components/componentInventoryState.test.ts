@@ -81,20 +81,27 @@ const createRelatedVulnerability = (
 
 const createSnapshot = (
   components: TrackedComponent[],
-  relationships?: Map<string, RelatedVulnerabilitySummary[]>,
-  purlMatches: readonly ComponentPurlMatchSummary[] = []
+  relationshipsByComponent?: Map<string, RelatedVulnerabilitySummary[]>,
+  purlMatches: readonly ComponentPurlMatchSummary[] = [],
+  relationshipsByOccurrence: Map<string, RelatedVulnerabilitySummary[]> = new Map()
 ): ComponentInventoryWorkspaceSnapshot => {
   const occurrences = components.flatMap((component) => component.sources);
   const occurrenceCount = occurrences.length;
+  const sourceFiles = Array.from(new Set(occurrences
+    .map((occurrence) => occurrence.sourcePath)
+    .filter((sourcePath): sourcePath is string => Boolean(sourcePath))))
+    .sort((left, right) => left.localeCompare(right));
+  const formats = Array.from(new Set(occurrences.map((occurrence) => occurrence.format)))
+    .sort((left, right) => left.localeCompare(right));
 
   return {
     inventory: {
       catalog: {
         componentCount: components.length,
         components,
-        formats: ['cyclonedx', 'spdx'],
+        formats,
         occurrenceCount,
-        sourceFiles: ['reports/a.cdx.json', 'reports/b.spdx.json']
+        sourceFiles
       },
       configuredSbomCount: 2,
       enabledSbomCount: 2,
@@ -107,8 +114,8 @@ const createSnapshot = (
     relationships: {
       componentsByVulnerability: new Map(),
       relationships: [],
-      vulnerabilitiesByComponent: relationships ?? new Map(),
-      vulnerabilitiesByOccurrence: new Map()
+      vulnerabilitiesByComponent: relationshipsByComponent ?? new Map(),
+      vulnerabilitiesByOccurrence: relationshipsByOccurrence
     },
     purlMatches
   };
@@ -204,7 +211,13 @@ test('deriveComponentInventoryState returns deterministic summaries and no-resul
   assert.equal(derived.summary.vulnerableCount, 1);
   assert.equal(derived.hasActiveFilters, true);
   assert.deepEqual(derived.components.map((entry) => entry.component.name), ['lodash']);
-  assert.deepEqual(derived.availableSourceFiles, ['reports/a.cdx.json', 'reports/b.spdx.json']);
+  assert.deepEqual(derived.availableProjects, [
+    { id: 'project::portal-web', name: 'Portal Web' }
+  ]);
+  assert.deepEqual(derived.availableSboms, [
+    { id: 'sbom-a', label: 'a.cdx.json' }
+  ]);
+  assert.deepEqual(derived.availableSourceFiles, ['reports/a.cdx.json']);
 });
 
 test('deriveComponentInventoryState counts linked vulnerabilities even when the SBOM component has none embedded', () => {
@@ -289,4 +302,97 @@ test('deriveComponentInventoryState filters purl diagnostics to the visible comp
   assert.deepEqual(derived.components.map((entry) => entry.component.name), ['lodash']);
   assert.deepEqual(derived.purlMatches.map((entry) => entry.componentName), ['lodash']);
   assert.equal(derived.purlMatches[0]?.queryState, 'hit');
+});
+
+test('deriveComponentInventoryState scopes SBOM and source-file filters to the selected project', () => {
+  const portalSource = createSource();
+  const identitySource = createSource({
+    componentId: 'component-2',
+    componentKey: 'name-version:component@1.0.0',
+    documentName: 'b',
+    format: 'spdx',
+    id: 'component-occurrence::sbom-b::component-2',
+    projectId: 'project::identity-api',
+    projectName: 'Identity API',
+    sbomFileName: 'identity-api.spdx.json',
+    sbomId: 'sbom-b',
+    sbomLabel: 'b',
+    sourcePath: 'reports/identity-api.spdx.json'
+  });
+
+  const snapshot = createSnapshot([
+    createComponent({
+      sources: [portalSource, identitySource],
+      sourceFiles: ['reports/a.cdx.json', 'reports/identity-api.spdx.json']
+    })
+  ]);
+
+  const derived = deriveComponentInventoryState(snapshot, {
+    ...createDefaultComponentInventoryFilters(),
+    projectId: 'project::identity-api'
+  });
+
+  assert.deepEqual(derived.availableSboms, [
+    { id: 'sbom-b', label: 'identity-api.spdx.json' }
+  ]);
+  assert.deepEqual(derived.availableSourceFiles, ['reports/identity-api.spdx.json']);
+  assert.deepEqual(derived.components[0]?.visibleSources.map((source) => source.projectId), ['project::identity-api']);
+});
+
+test('deriveComponentInventoryState scopes vulnerability counts to the selected project occurrence', () => {
+  const portalSource = createSource({
+    id: 'component-occurrence::sbom-a::widget',
+    vulnerabilityCount: 1,
+    vulnerabilityIds: ['CVE-2026-0001']
+  });
+  const identitySource = createSource({
+    componentId: 'component-2',
+    componentKey: 'purl:pkg:npm/widget@1.2.3',
+    id: 'component-occurrence::sbom-b::widget',
+    projectId: 'project::identity-api',
+    projectName: 'Identity API',
+    sbomFileName: 'identity-api.spdx.json',
+    sbomId: 'sbom-b',
+    sbomLabel: 'b',
+    sourcePath: 'reports/identity-api.spdx.json',
+    vulnerabilityCount: 0,
+    vulnerabilityIds: []
+  });
+
+  const component = createComponent({
+    highestSeverity: 'high',
+    key: 'purl:pkg:npm/widget@1.2.3',
+    name: 'widget',
+    purl: 'pkg:npm/widget@1.2.3',
+    sourceFiles: ['reports/a.cdx.json', 'reports/identity-api.spdx.json'],
+    sources: [portalSource, identitySource],
+    vulnerabilities: [{
+      cwes: [],
+      id: 'CVE-2026-0001',
+      severity: 'high'
+    }],
+    vulnerabilityCount: 1,
+    version: '1.2.3'
+  });
+
+  const snapshot = createSnapshot(
+    [component],
+    undefined,
+    [],
+    new Map([
+      ['component-occurrence::sbom-a::widget', [createRelatedVulnerability({
+        id: 'CVE-2026-0001',
+        severity: 'HIGH'
+      })]]
+    ])
+  );
+
+  const derived = deriveComponentInventoryState(snapshot, {
+    ...createDefaultComponentInventoryFilters(),
+    projectId: 'project::identity-api'
+  });
+
+  assert.equal(derived.components[0]?.vulnerabilityCount, 0);
+  assert.equal(derived.components[0]?.highestSeverity, undefined);
+  assert.deepEqual(derived.components[0]?.visibleSources.map((source) => source.id), ['component-occurrence::sbom-b::widget']);
 });
