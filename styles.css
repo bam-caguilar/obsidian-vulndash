@@ -599,6 +599,7 @@
 }
 
 .vulndash-sbom-field input,
+.vulndash-sbom-field select,
 .vulndash-sbom-component-field input,
 .vulndash-sbom-compare-select select {
   width: 100%;
@@ -681,6 +682,12 @@
 .vulndash-project-quick-picks {
   display: grid;
   gap: 0.5rem;
+}
+
+.vulndash-briefing-scope-form,
+.vulndash-briefing-scope-checkboxes {
+  display: grid;
+  gap: 0.75rem;
 }
 
 .vulndash-project-quick-pick-list {

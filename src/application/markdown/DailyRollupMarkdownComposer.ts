@@ -21,6 +21,7 @@ export interface DailyRollupMarkdownComposerInput {
   generatedAt: string;
   dateLabel: string;
   findings: DailyRollupFindingInput[];
+  scopeLabel?: string;
   title?: string;
   summary?: string;
 }
@@ -51,6 +52,7 @@ export class DailyRollupMarkdownComposer {
 
     builder.callout('summary', 'Rollup Summary', [
       `Generated At: ${input.generatedAt}`,
+      ...(input.scopeLabel?.trim() ? [`Scope: ${MarkdownBuilder.bold(input.scopeLabel.trim())}`] : []),
       `Findings: ${MarkdownBuilder.bold(String(sortedFindings.length))}`,
       `Critical / High: ${MarkdownBuilder.bold(String(this.countCriticalHigh(sortedFindings)))}`
     ]);
@@ -61,7 +63,9 @@ export class DailyRollupMarkdownComposer {
 
     if (sortedFindings.length === 0) {
       builder.callout('success', 'No Findings Selected', [
-        'No findings met the current rollup selection criteria.'
+        input.scopeLabel?.trim()
+          ? `No findings met the current rollup selection criteria for ${input.scopeLabel.trim()}.`
+          : 'No findings met the current rollup selection criteria.'
       ]);
       return builder.build();
     }

@@ -1,5 +1,6 @@
 import type { RollupFinding } from '../../domain/rollup/RollupFinding';
 import { formatTriageStateLabel } from '../../domain/triage/TriageState';
+import type { ResolvedBriefingScope } from '../briefing/BriefingScopeService';
 import {
   DailyRollupMarkdownComposer,
   type DailyRollupFindingInput,
@@ -14,6 +15,7 @@ export interface ManagedMarkdownSection {
 export interface RenderedDailyRollup {
   readonly analystNotesHeading: string;
   readonly analystNotesPlaceholder: string;
+  readonly fileName: string;
   readonly managedSections: readonly ManagedMarkdownSection[];
   readonly title: string;
 }
@@ -21,6 +23,7 @@ export interface RenderedDailyRollup {
 export interface RenderDailyRollupInput {
   readonly date: string;
   readonly findings: readonly RollupFinding[];
+  readonly scope: ResolvedBriefingScope;
 }
 
 const asSentence = (value: string): string => {
@@ -52,14 +55,19 @@ export class RollupMarkdownRenderer {
   ) {}
 
   public render(input: RenderDailyRollupInput): RenderedDailyRollup {
-    const composerInput = this.mapToComposerInput(input.date, input.findings);
-    const composedMarkdown = this.composer.compose(composerInput);
-    const title = `# ${composerInput.title ?? `Daily Rollup - ${input.date}`}`;
+    const composerInput = this.mapToComposerInput(input.date, input.findings, input.scope);
+    const scopedComposerInput = {
+      ...composerInput,
+      scopeLabel: input.scope.displayLabel
+    };
+    const composedMarkdown = this.composer.compose(scopedComposerInput);
+    const title = `# ${scopedComposerInput.title ?? `Daily Rollup - ${input.date}`}`;
     const body = this.stripLeadingTitleHeading(composedMarkdown, title);
 
     return {
       analystNotesHeading: '## Analyst Notes',
       analystNotesPlaceholder: '- Add analyst notes, escalation context, and follow-up decisions here.',
+      fileName: `${scopedComposerInput.title ?? `Daily Rollup - ${input.date}`}.md`,
       managedSections: [
         {
           key: 'daily-rollup',
@@ -72,15 +80,19 @@ export class RollupMarkdownRenderer {
 
   private mapToComposerInput(
     date: string,
-    findings: readonly RollupFinding[]
+    findings: readonly RollupFinding[],
+    scope?: ResolvedBriefingScope
   ): DailyRollupMarkdownComposerInput {
     const sortedFindings = this.sortFindings(findings);
+    const titleSuffix = scope && scope.scope.type !== 'all-projects'
+      ? ` - ${scope.displayLabel}`
+      : '';
 
     return {
       generatedAt: date,
       dateLabel: date,
-      title: `VulnDash Briefing ${date}`,
-      summary: this.buildSummary(sortedFindings),
+      title: `VulnDash Briefing ${date}${titleSuffix}`,
+      summary: this.buildSummary(sortedFindings, scope),
       findings: sortedFindings.map((finding) => this.mapFinding(finding))
     };
   }
@@ -144,8 +156,12 @@ export class RollupMarkdownRenderer {
     return components.length > 0 ? components : undefined;
   }
 
-  private buildSummary(findings: readonly RollupFinding[]): string {
+  private buildSummary(findings: readonly RollupFinding[], scope?: ResolvedBriefingScope): string {
     if (findings.length === 0) {
+      if (scope && scope.scope.type !== 'all-projects') {
+        return `No findings matched the daily briefing policy for ${scope.displayLabel}.`;
+      }
+
       return 'No findings matched the daily briefing policy for this date.';
     }
 
@@ -180,6 +196,10 @@ export class RollupMarkdownRenderer {
       summaryParts.push(
         `${unmappedCount} finding${unmappedCount === 1 ? '' : 's'} still require project mapping`
       );
+    }
+
+    if (scope && scope.scope.type !== 'all-projects') {
+      summaryParts.unshift(`Scope: ${scope.displayLabel}`);
     }
 
     return asSentence(summaryParts.join('; '));

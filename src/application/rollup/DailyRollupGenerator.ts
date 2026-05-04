@@ -1,8 +1,14 @@
 import { DailyRollupPolicy } from '../../domain/rollup/DailyRollupPolicy';
+import {
+  BriefingScopeService,
+  type ResolvedBriefingScope
+} from '../briefing/BriefingScopeService';
 import type { AffectedProjectResolution } from '../../domain/correlation/AffectedProjectResolution';
+import type { BriefingScope } from '../../domain/briefing/BriefingScope';
 import type { Vulnerability } from '../../domain/entities/Vulnerability';
 import { AsyncTaskCoordinator } from '../../infrastructure/async/AsyncTaskCoordinator';
-import type { DailyRollupSettings } from '../use-cases/types';
+import type { DailyRollupSettings, ImportedSbomConfig } from '../use-cases/types';
+import type { Project } from '../../domain/project/Project';
 import {
   RollupMarkdownRenderer,
   type RenderDailyRollupInput,
@@ -35,17 +41,21 @@ export class DailyRollupGenerator {
     private readonly selectFindings: SelectRollupFindings,
     private readonly renderer: RollupMarkdownRenderer,
     private readonly writer: DailyRollupWriter,
-    private readonly asyncTaskCoordinator = new AsyncTaskCoordinator()
+    private readonly asyncTaskCoordinator = new AsyncTaskCoordinator(),
+    private readonly briefingScopeService = new BriefingScopeService()
   ) {}
 
   public async execute(input: {
     readonly affectedProjectsByVulnerabilityRef: ReadonlyMap<string, AffectedProjectResolution>;
     readonly date: string;
+    readonly projects: readonly Project[];
     readonly settings: DailyRollupSettings;
+    readonly sboms: readonly ImportedSbomConfig[];
+    readonly scope: BriefingScope;
     readonly triageByCacheKey: ReadonlyMap<string, RollupTriageSnapshot>;
     readonly vulnerabilities: readonly Vulnerability[];
   }): Promise<DailyRollupGenerationResult> {
-    const findings = this.selectFindings.execute({
+    const allFindings = this.selectFindings.execute({
       affectedProjectsByVulnerabilityRef: input.affectedProjectsByVulnerabilityRef,
       policy: new DailyRollupPolicy({
         excludedTriageStates: input.settings.excludedTriageStates,
@@ -55,9 +65,20 @@ export class DailyRollupGenerator {
       triageByCacheKey: input.triageByCacheKey,
       vulnerabilities: input.vulnerabilities
     });
+    const resolvedScope = this.briefingScopeService.resolveScope(
+      input.scope,
+      input.projects,
+      input.sboms
+    );
+    const findings = this.briefingScopeService.filterFindings(
+      allFindings,
+      resolvedScope,
+      input.sboms
+    );
     const document = await this.renderDocument({
       date: input.date,
-      findings
+      findings,
+      scope: resolvedScope
     });
     const written = await this.writer.write({
       date: input.date,
@@ -73,7 +94,9 @@ export class DailyRollupGenerator {
     };
   }
 
-  private async renderDocument(input: RenderDailyRollupInput): Promise<RenderedDailyRollup> {
+  private async renderDocument(input: RenderDailyRollupInput & {
+    readonly scope: ResolvedBriefingScope;
+  }): Promise<RenderedDailyRollup> {
     const rendered = await this.asyncTaskCoordinator.execute('render-daily-rollup', input, {
       fallback: async (payload, scheduler) => {
         await scheduler.yieldToHost({ timeoutMs: 16 });

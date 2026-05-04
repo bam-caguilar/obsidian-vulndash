@@ -16,6 +16,13 @@ const normalizePath = (value: string): string =>
     .replace(/\/+/g, '/')
     .replace(/^\.?\//, '');
 
+const sanitizeFileName = (value: string): string =>
+  value
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 export class DailyRollupNoteWriter {
   public constructor(
     private readonly vault: DailyRollupVaultAdapter,
@@ -32,9 +39,11 @@ export class DailyRollupNoteWriter {
     readonly path: string;
   }> {
     const folderPath = normalizePath(input.folderPath);
+    const fileName = sanitizeFileName(input.document.fileName)
+      || `VulnDash Briefing ${input.date}.md`;
     const notePath = folderPath.length > 0
-      ? `${folderPath}/VulnDash Briefing ${input.date}.md`
-      : `VulnDash Briefing ${input.date}.md`;
+      ? `${folderPath}/${fileName}`
+      : fileName;
     await this.ensureFolder(folderPath);
 
     const exists = await this.vault.exists(notePath);

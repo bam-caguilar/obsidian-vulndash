@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { ALL_PROJECTS_BRIEFING_SCOPE } from '../../../src/domain/briefing/BriefingScope';
 import { DailyRollupGenerator, type DailyRollupWriter } from '../../../src/application/rollup/DailyRollupGenerator';
 import type { RenderedDailyRollup } from '../../../src/application/rollup/RollupMarkdownRenderer';
 import type { RollupFinding } from '../../../src/domain/rollup/RollupFinding';
@@ -30,14 +31,16 @@ test('DailyRollupGenerator orchestrates selection, rendering, and writing', asyn
   const rendered: RenderedDailyRollup = {
     analystNotesHeading: '## Analyst Notes',
     analystNotesPlaceholder: '- Placeholder',
+    fileName: 'VulnDash Briefing 2026-04-18.md',
     managedSections: [],
     title: '# VulnDash Briefing 2026-04-18'
   };
   const renderer = {
-    render: (input: { readonly date: string; readonly findings: readonly RollupFinding[]; }) => {
+    render: (input: { readonly date: string; readonly findings: readonly RollupFinding[]; readonly scope: { readonly displayLabel: string; }; }) => {
       calls.push('render-fallback');
       assert.equal(input.date, '2026-04-18');
       assert.equal(input.findings, findings);
+      assert.equal(input.scope.displayLabel, 'All Projects');
       return rendered;
     }
   } as unknown as RollupMarkdownRenderer;
@@ -68,7 +71,10 @@ test('DailyRollupGenerator orchestrates selection, rendering, and writing', asyn
   const result = await new DailyRollupGenerator(selector, renderer, writer, asyncTaskCoordinator as never).execute({
     affectedProjectsByVulnerabilityRef: new Map(),
     date: '2026-04-18',
+    projects: [],
+    scope: ALL_PROJECTS_BRIEFING_SCOPE,
     settings,
+    sboms: [],
     triageByCacheKey: new Map(),
     vulnerabilities: []
   });
@@ -123,6 +129,7 @@ class InMemoryRollupVault implements DailyRollupVaultAdapter {
 const createRenderedDocument = (): RenderedDailyRollup => ({
   analystNotesHeading: '## Analyst Notes',
   analystNotesPlaceholder: '- Add analyst notes, escalation context, and follow-up decisions here.',
+  fileName: 'VulnDash Briefing 2026-04-18.md',
   managedSections: [{
     content: '## Findings Overview\n\n- Critical issue',
     key: 'daily-rollup'
@@ -177,4 +184,21 @@ test('DailyRollupNoteWriter updates an existing rollup note while preserving ana
   assert.deepEqual(vault.writes, [notePath]);
   assert.match(result.content, /Existing analyst note/);
   assert.match(result.content, /Critical issue/);
+});
+
+test('DailyRollupNoteWriter uses the rendered file name for scoped briefings', async () => {
+  const vault = new InMemoryRollupVault();
+  const writer = new DailyRollupNoteWriter(vault);
+
+  const result = await writer.write({
+    date: '2026-04-18',
+    document: {
+      ...createRenderedDocument(),
+      fileName: 'VulnDash Briefing 2026-04-18 - Portal Web.md',
+      title: '# VulnDash Briefing 2026-04-18 - Portal Web'
+    },
+    folderPath: 'briefings/daily'
+  });
+
+  assert.equal(result.path, 'briefings/daily/VulnDash Briefing 2026-04-18 - Portal Web.md');
 });
