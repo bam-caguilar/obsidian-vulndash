@@ -1,4 +1,4 @@
-import type { NormalizedSbomFormat } from '../../domain/sbom/types';
+import type { NormalizedSbomFormat } from '../../../domain/sbom/types';
 import type {
   ComponentInventoryFilters,
   ComponentSeverityFilter

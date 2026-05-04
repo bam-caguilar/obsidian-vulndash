@@ -11,7 +11,7 @@ import {
   createDefaultComponentInventoryFilters,
   deriveComponentInventoryState,
   filterTrackedComponents
-} from '../../../src/presentation/components/ComponentInventoryStore';
+} from '../../../src/presentation/components/sbom/ComponentInventoryStore';
 
 const createSource = (
   overrides: Partial<TrackedComponentSource> = {}

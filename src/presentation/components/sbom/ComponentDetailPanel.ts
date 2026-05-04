@@ -1,6 +1,6 @@
 import { App, Component, MarkdownRenderer, normalizePath } from 'obsidian';
-import type { RelatedVulnerabilitySummary, TrackedComponent } from '../../application/sbom/types';
-import { sanitizeText, sanitizeUrl } from '../../infrastructure/security/sanitize';
+import type { RelatedVulnerabilitySummary, TrackedComponent } from '../../../application/sbom/types';
+import { sanitizeText, sanitizeUrl } from '../../../infrastructure/security/sanitize';
 
 export interface ComponentDetailPanelCallbacks {
   effectiveHighestSeverity?: string;

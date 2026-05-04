@@ -1,210 +1,211 @@
-import type { RelatedVulnerabilitySummary, TrackedComponent } from '../../application/sbom/types';
+import type { TrackedComponent } from '../../../application/sbom/types';
+import type { ComponentInventoryDisplayEntry } from './ComponentInventoryStore';
 import type { ComponentDetailPanelCallbacks, ComponentDetailsRenderer } from './ComponentDetailPanel';
+import { RowRenderer } from '../virtualization/RowRenderer';
 
 export interface ComponentRowRendererCallbacks extends ComponentDetailPanelCallbacks {
   detailsRenderer: ComponentDetailsRenderer;
-  effectiveHighestSeverity?: string;
-  effectiveVulnerabilityCount: number;
+  isExpanded: (componentKey: string) => boolean;
   onDisable: (component: TrackedComponent) => void;
   onEnable: (component: TrackedComponent) => void;
   onFollow: (component: TrackedComponent) => void;
-  relatedVulnerabilities?: readonly RelatedVulnerabilitySummary[];
-  onToggleExpanded: (componentKey: string, expanded: boolean) => void;
   onUnfollow: (component: TrackedComponent) => void;
-  visibleSources?: readonly TrackedComponent['sources'][number][];
+  onToggleExpanded: (componentKey: string, expanded: boolean) => void;
 }
 
 const formatSeverity = (severity: string | undefined): string =>
   severity ? `${severity.charAt(0).toUpperCase()}${severity.slice(1)}` : 'None';
 
-const getRowClasses = (
-  component: TrackedComponent,
-  expanded: boolean,
-  vulnerabilityCount: number
-): string[] => {
-  const classes = ['vulndash-component-row'];
-
-  if (expanded) {
-    classes.push('is-expanded');
-  }
-  if (!component.isEnabled) {
-    classes.push('is-disabled');
-  }
-  if (component.isFollowed) {
-    classes.push('is-followed');
-  }
-  if (vulnerabilityCount > 0) {
-    classes.push('is-vulnerable');
-  }
-
-  return classes;
-};
-
-const createBadge = (
-  containerEl: HTMLElement,
-  label: string,
-  className: string
-): void => {
-  containerEl.createSpan({
-    cls: className,
-    text: label
-  });
-};
-
 const uniqueValues = (values: ReadonlyArray<string | undefined>): string[] =>
   Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))));
 
-const renderValueStack = (
-  containerEl: HTMLElement,
-  primary: string,
-  secondary?: string
-): void => {
-  const stack = containerEl.createDiv({ cls: 'vulndash-component-source-stack' });
-  stack.createEl('strong', { text: primary });
-  if (secondary) {
-    stack.createDiv({
-      cls: 'vulndash-muted-copy',
-      text: secondary
+export class ComponentRowRenderer implements RowRenderer<ComponentInventoryDisplayEntry> {
+
+  constructor(private callbacks: ComponentRowRendererCallbacks) {}
+
+  public renderRow(entry: ComponentInventoryDisplayEntry, index: number): HTMLElement {
+    const component = entry.component;
+    const expanded = this.callbacks.isExpanded(component.key);
+
+    const row = document.createElement('div');
+    row.className = 'vulndash-virtual-row-container';
+    row.dataset.index = index.toString();
+
+    // The Main Visible Row
+    const mainRow = document.createElement('div');
+    mainRow.className = 'vulndash-virtual-row component-row';
+    this.applyRowClasses(mainRow, component, entry.vulnerabilityCount);
+
+    // Project Column
+    const projectNames = uniqueValues(entry.visibleSources.map((source) => source.projectName));
+    const projectCol = mainRow.createDiv({ cls: 'vulndash-col' });
+    this.renderValueStack(projectCol, projectNames[0] ?? 'Unassigned Project', projectNames.length > 1 ? `${projectNames.length} projects in scope` : undefined);
+
+    // SBOM Column
+    const sbomNames = uniqueValues(entry.visibleSources.map((source) => source.sbomFileName));
+    const sbomCol = mainRow.createDiv({ cls: 'vulndash-col' });
+    this.renderValueStack(sbomCol, sbomNames[0] ?? 'Unknown SBOM', sbomNames.length > 1 ? `${sbomNames.length} SBOM files in scope` : undefined);
+
+    // Name Column
+    const nameCol = mainRow.createDiv({ cls: 'vulndash-col' });
+    const nameStack = nameCol.createDiv({ cls: 'vulndash-component-name-stack' });
+    nameStack.createEl('strong', { text: component.name });
+    nameStack.createDiv({ cls: 'vulndash-muted-copy', text: component.supplier ?? 'Unknown supplier' });
+    const stateBadges = nameStack.createDiv({ cls: 'vulndash-component-chip-list' });
+    this.renderBadges(stateBadges, component);
+
+    // Version & Identifier
+    mainRow.createDiv({ cls: 'vulndash-col', text: component.version ?? 'No version' });
+    mainRow.createDiv({ cls: 'vulndash-col vulndash-component-table-mono', text: component.purl ?? component.cpe ?? 'None' });
+
+    // Vulnerability Column
+    const vulnCol = mainRow.createDiv({ cls: 'vulndash-col' });
+    const vulnStack = vulnCol.createDiv({ cls: 'vulndash-component-vuln-stack' });
+    vulnStack.createSpan({ text: String(entry.vulnerabilityCount) });
+    vulnStack.createSpan({
+      cls: `vulndash-severity-pill is-${entry.highestSeverity?.toLowerCase() ?? 'none'}`,
+      text: formatSeverity(entry.highestSeverity)
     });
-  }
-};
 
-export const renderComponentRow = (
-  tableBodyEl: HTMLElement,
-  component: TrackedComponent,
-  expanded: boolean,
-  callbacks: ComponentRowRendererCallbacks
-): void => {
-  const effectiveVulnerabilityCount = callbacks.effectiveVulnerabilityCount;
-  const effectiveHighestSeverity = callbacks.effectiveHighestSeverity ?? component.highestSeverity;
-  const visibleSources = callbacks.visibleSources ?? component.sources;
-  const projectNames = uniqueValues(visibleSources.map((source) => source.projectName));
-  const sbomFileNames = uniqueValues(visibleSources.map((source) => source.sbomFileName));
-  const row = tableBodyEl.createEl('tr', {
-    cls: getRowClasses(component, expanded, effectiveVulnerabilityCount).join(' ')
-  });
+    // Actions Column
+    const actionsCol = mainRow.createDiv({ cls: 'vulndash-col' });
+    this.renderActions(actionsCol, component, expanded);
 
-  const projectCell = row.createEl('td');
-  renderValueStack(
-    projectCell,
-    projectNames[0] ?? 'Unassigned Project',
-    projectNames.length > 1 ? `${projectNames.length} projects in scope` : undefined
-  );
+    row.appendChild(mainRow);
 
-  const sbomCell = row.createEl('td');
-  renderValueStack(
-    sbomCell,
-    sbomFileNames[0] ?? 'Unknown SBOM',
-    sbomFileNames.length > 1 ? `${sbomFileNames.length} SBOM files in scope` : undefined
-  );
+    // The Expanded Details Panel
+    if (expanded) {
+      const detailsRow = document.createElement('div');
+      detailsRow.className = 'vulndash-component-details-row is-visible';
+      const detailsHost = detailsRow.createDiv({ cls: 'vulndash-component-details-host' });
 
-  const nameCell = row.createEl('td');
-  const nameStack = nameCell.createDiv({ cls: 'vulndash-component-name-stack' });
-  nameStack.createEl('strong', { text: component.name });
-  nameStack.createDiv({
-    cls: 'vulndash-muted-copy',
-    text: component.supplier ?? 'Unknown supplier'
-  });
-  const stateBadges = nameStack.createDiv({ cls: 'vulndash-component-chip-list' });
-  if (component.isFollowed) {
-    createBadge(stateBadges, 'Followed', 'vulndash-badge vulndash-badge-success');
-  }
-  if (!component.isEnabled) {
-    createBadge(stateBadges, 'Disabled', 'vulndash-badge vulndash-badge-neutral');
-  }
-  if (component.formats.length > 0) {
-    createBadge(
-      stateBadges,
-      component.formats.map((format) => format === 'cyclonedx' ? 'CycloneDX' : 'SPDX').join(', '),
-      'vulndash-badge vulndash-badge-neutral'
-    );
+      const detailCallbacks: ComponentDetailPanelCallbacks = {};
+        if (entry.highestSeverity) {
+          detailCallbacks.effectiveHighestSeverity = entry.highestSeverity;
+        }
+        if (entry.relatedVulnerabilities) {
+          detailCallbacks.relatedVulnerabilities = entry.relatedVulnerabilities;
+        }
+        if (this.callbacks.onOpenNote) {
+          detailCallbacks.onOpenNote = this.callbacks.onOpenNote;
+        }
+
+      // For ease of implementation, the details renderer needs to know about unmapped SBOM labels in order to render the "unmapped" section. These are derived from the affected project resolution, so we need to pass them through here.
+      // detailCallbacks.unmappedSbomLabels = entry.relatedVulnerabilities.flatMap((vuln) => vuln.affectedProjects.flatMap((project) => project.sourceSbomLabels))
+      //   .filter((label, index, self) => label && self.indexOf(label) === index) as string[]; // unique non-empty labels
+      void this.callbacks.detailsRenderer.renderDetails(detailsHost, component, detailCallbacks);
+      row.appendChild(detailsRow);
+    }
+
+    return row;
   }
 
-  row.createEl('td', { text: component.version ?? 'No version' });
-  row.createEl('td', {
-    cls: 'vulndash-component-table-mono',
-    text: component.purl ?? component.cpe ?? 'None'
-  });
+  public updateRow(element: HTMLElement, entry: ComponentInventoryDisplayEntry, index: number): void {
+    element.dataset.index = index.toString();
+    const mainRow = element.firstElementChild as HTMLElement;
+    if (!mainRow) return;
 
-  const vulnerabilityCell = row.createEl('td');
-  const vulnerabilityStack = vulnerabilityCell.createDiv({ cls: 'vulndash-component-vuln-stack' });
-  vulnerabilityStack.createSpan({ text: String(effectiveVulnerabilityCount) });
-  vulnerabilityStack.createSpan({
-    cls: `vulndash-severity-pill is-${effectiveHighestSeverity?.toLowerCase() ?? 'none'}`,
-    text: formatSeverity(effectiveHighestSeverity)
-  });
+    this.applyRowClasses(mainRow, entry.component, entry.vulnerabilityCount);
+    const cols = Array.from(mainRow.children) as HTMLElement[];
+    if (cols.length < 7) return;
 
-  const actionsCell = row.createEl('td');
-  const actions = actionsCell.createDiv({ cls: 'vulndash-component-row-actions' });
+    const [projectCol, sbomCol, nameCol, versionCol, purlCol, vulnCol, actionsCol] = cols as [
+      HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement
+    ];
 
-  const followButton = actions.createEl('button', {
-    text: component.isFollowed ? 'Unfollow' : 'Follow'
-  });
-  followButton.addClass(component.isFollowed ? 'mod-muted' : 'mod-cta');
-  followButton.addEventListener('click', (event) => {
-    event.stopPropagation();
+    projectCol.empty();
+    const projectNames = uniqueValues(entry.visibleSources.map((source) => source.projectName));
+    this.renderValueStack(projectCol, projectNames[0] ?? 'Unassigned Project', projectNames.length > 1 ? `${projectNames.length} projects in scope` : undefined);
+
+    sbomCol.empty();
+    const sbomNames = uniqueValues(entry.visibleSources.map((source) => source.sbomFileName));
+    this.renderValueStack(sbomCol, sbomNames[0] ?? 'Unknown SBOM', sbomNames.length > 1 ? `${sbomNames.length} SBOM files in scope` : undefined);
+
+    const nameStack = nameCol.querySelector('.vulndash-component-name-stack') as HTMLElement | null;
+    if (nameStack) {
+      const strong = nameStack.querySelector('strong') as HTMLElement | null;
+      if (strong) strong.textContent = entry.component.name;
+      const badges = nameStack.querySelector('.vulndash-component-chip-list') as HTMLElement | null;
+      if (badges) {
+        badges.empty();
+        this.renderBadges(badges as HTMLElement, entry.component);
+      }
+    }
+
+    versionCol.textContent = entry.component.version ?? 'No version';
+    purlCol.textContent = entry.component.purl ?? entry.component.cpe ?? 'None';
+
+    const vulnStack = vulnCol.querySelector('.vulndash-component-vuln-stack') as HTMLElement | null;
+    if (vulnStack) {
+      vulnStack.empty();
+      vulnStack.createSpan({ text: String(entry.vulnerabilityCount) });
+      vulnStack.createSpan({
+        cls: `vulndash-severity-pill is-${entry.highestSeverity?.toLowerCase() ?? 'none'}`,
+        text: formatSeverity(entry.highestSeverity)
+      });
+    }
+
+    actionsCol.empty();
+    this.renderActions(actionsCol, entry.component, this.callbacks.isExpanded(entry.component.key));
+  }
+
+  private applyRowClasses(row: HTMLElement, component: TrackedComponent, vulnCount: number): void {
+    row.className = 'vulndash-virtual-row component-row';
+    if (!component.isEnabled) row.classList.add('is-disabled');
+    if (component.isFollowed) row.classList.add('is-followed');
+    if (vulnCount > 0) row.classList.add('is-vulnerable');
+  }
+
+  private renderValueStack(container: HTMLElement, primary: string, secondary?: string): void {
+    const stack = container.createDiv({ cls: 'vulndash-component-source-stack' });
+    stack.createEl('strong', { text: primary });
+    if (secondary) {
+      stack.createDiv({ cls: 'vulndash-muted-copy', text: secondary });
+    }
+  }
+
+  private renderBadges(container: HTMLElement, component: TrackedComponent): void {
     if (component.isFollowed) {
-      callbacks.onUnfollow(component);
-      return;
+      container.createSpan({ cls: 'vulndash-badge vulndash-badge-success', text: 'Followed' });
     }
-
-    callbacks.onFollow(component);
-  });
-
-  const enabledButton = actions.createEl('button', {
-    text: component.isEnabled ? 'Disable' : 'Enable'
-  });
-  if (!component.isEnabled) {
-    enabledButton.addClass('mod-cta');
-  } else {
-    enabledButton.addClass('mod-muted');
-  }
-  enabledButton.addEventListener('click', (event) => {
-    event.stopPropagation();
-    if (component.isEnabled) {
-      callbacks.onDisable(component);
-      return;
+    if (!component.isEnabled) {
+      container.createSpan({ cls: 'vulndash-badge vulndash-badge-neutral', text: 'Disabled' });
     }
-
-    callbacks.onEnable(component);
-  });
-
-  const detailButton = actions.createEl('button', {
-    attr: {
-      'aria-expanded': String(expanded)
-    },
-    text: expanded ? 'Hide Details' : 'View Details'
-  });
-  detailButton.addEventListener('click', (event) => {
-    event.stopPropagation();
-    callbacks.onToggleExpanded(component.key, !expanded);
-  });
-
-  const detailsRow = tableBodyEl.createEl('tr', {
-    cls: `vulndash-component-details-row${expanded ? ' is-visible' : ''}`
-  });
-  detailsRow.style.display = expanded ? 'table-row' : 'none';
-
-  const detailsCell = detailsRow.createEl('td', {
-    attr: {
-      colspan: '7'
+    if (component.formats && component.formats.length > 0) {
+      const formatText = component.formats.map((f) => f === 'cyclonedx' ? 'CycloneDX' : 'SPDX').join(', ');
+      container.createSpan({ cls: 'vulndash-badge vulndash-badge-neutral', text: formatText });
     }
-  });
-
-  const detailsHost = detailsCell.createDiv({ cls: 'vulndash-component-details-host' });
-
-  const detailCallbacks: ComponentDetailPanelCallbacks = {};
-  if (callbacks.onOpenNote) {
-    detailCallbacks.onOpenNote = callbacks.onOpenNote;
-  }
-  if (callbacks.relatedVulnerabilities) {
-    detailCallbacks.relatedVulnerabilities = callbacks.relatedVulnerabilities;
-  }
-  if (effectiveHighestSeverity) {
-    detailCallbacks.effectiveHighestSeverity = effectiveHighestSeverity;
   }
 
-  if (expanded) {
-    void callbacks.detailsRenderer.renderDetails(detailsHost, component, detailCallbacks);
+  private renderActions(container: HTMLElement, component: TrackedComponent, expanded: boolean): void {
+    const actions = container.createDiv({ cls: 'vulndash-component-row-actions' });
+
+    const followBtn = actions.createEl('button', { text: component.isFollowed ? 'Unfollow' : 'Follow' });
+    followBtn.addClass(component.isFollowed ? 'mod-muted' : 'mod-cta');
+    followBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (component.isFollowed) {
+        this.callbacks.onUnfollow(component);
+      } else {
+        this.callbacks.onFollow(component);
+      }
+    });
+
+    const enableBtn = actions.createEl('button', { text: component.isEnabled ? 'Disable' : 'Enable' });
+    enableBtn.addClass(!component.isEnabled ? 'mod-cta' : 'mod-muted');
+    enableBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (component.isEnabled) {
+        this.callbacks.onDisable(component);
+      } else {
+        this.callbacks.onEnable(component);
+      }
+    });
+
+    const detailBtn = actions.createEl('button', { text: expanded ? 'Hide Details' : 'View Details' });
+    detailBtn.onclick = (e) => {
+      e.stopPropagation();
+      this.callbacks.onToggleExpanded(component.key, !expanded);
+    };
   }
-};
+}

@@ -1,4 +1,4 @@
-import { TRIAGE_STATES, formatTriageStateLabel, type TriageState } from '../../domain/triage/TriageState';
+import { TRIAGE_STATES, formatTriageStateLabel, type TriageState } from '../../../domain/triage/TriageState';
 
 const buildStateClassName = (state: TriageState): string =>
   `vulndash-triage-state-${state}`;

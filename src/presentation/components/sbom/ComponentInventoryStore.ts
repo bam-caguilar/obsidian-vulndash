@@ -1,15 +1,15 @@
 import type {
   NormalizedSbomFormat,
   NormalizedSeverity
-} from '../../domain/sbom/types';
-import { getHighestSeverity, getSeverityRank } from '../../domain/value-objects/Severity';
+} from '../../../domain/sbom/types';
+import { getHighestSeverity, getSeverityRank } from '../../../domain/value-objects/Severity';
 import type {
   ComponentPurlMatchSummary,
   ComponentInventoryWorkspaceSnapshot,
   RelatedVulnerabilitySummary,
   TrackedComponent,
   TrackedComponentSource
-} from '../../application/sbom/types';
+} from '../../../application/sbom/types';
 
 export type ComponentSeverityFilter = 'any' | NormalizedSeverity;
 

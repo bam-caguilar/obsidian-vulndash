@@ -1,5 +1,5 @@
-import type { TriageFilterMode } from '../../application/triage/FilterByTriageState';
-import { TRIAGE_STATES, formatTriageStateLabel } from '../../domain/triage/TriageState';
+import type { TriageFilterMode } from '../../../application/triage/FilterByTriageState';
+import { TRIAGE_STATES, formatTriageStateLabel } from '../../../domain/triage/TriageState';
 
 const FILTER_OPTIONS: ReadonlyArray<{
   label: string;

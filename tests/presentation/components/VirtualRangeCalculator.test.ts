@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateVirtualRange, createHeightPrefixSums } from '../../../src/presentation/components/VirtualRangeCalculator';
+import { calculateVirtualRange, createHeightPrefixSums } from '../../../src/presentation/components/virtualization/VirtualRangeCalculator';
 
 test('createHeightPrefixSums accumulates row heights deterministically', () => {
   assert.deepEqual(createHeightPrefixSums([40, 80, 60]), [0, 40, 120, 180]);

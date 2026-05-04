@@ -46,47 +46,6 @@ export interface VulnRowViewModel {
   unmappedSbomLabels: readonly string[];
 }
 
-const areStringArraysEqual = (left: readonly string[], right: readonly string[]): boolean =>
-  left.length === right.length && left.every((value, index) => value === right[index]);
-
-export const areAffectedProjectsEqual = (
-  left: readonly AffectedProjectLinkViewModel[],
-  right: readonly AffectedProjectLinkViewModel[]
-): boolean =>
-  left.length === right.length
-  && left.every((value, index) => value.notePath === right[index]?.notePath
-    && value.status === right[index]?.status
-    && value.text === right[index]?.text
-    && areStringArraysEqual(value.sourceSbomLabels, right[index]?.sourceSbomLabels ?? []));
-
-export const areRelatedComponentsEqual = (
-  left: readonly RelatedComponentBadgeViewModel[],
-  right: readonly RelatedComponentBadgeViewModel[]
-): boolean =>
-  left.length === right.length
-  && left.every((value, index) => value.label === right[index]?.label && value.evidence === right[index]?.evidence);
-
-export const areVulnRowViewModelsEqual = (left: VulnRowViewModel, right: VulnRowViewModel): boolean =>
-  areAffectedProjectsEqual(left.affectedProjects, right.affectedProjects)
-  && areStringArraysEqual(left.columnKeys, right.columnKeys)
-  && left.cvssText === right.cvssText
-  && left.expanded === right.expanded
-  && left.idText === right.idText
-  && left.isNew === right.isNew
-  && left.key === right.key
-  && left.publishedAtText === right.publishedAtText
-  && areStringArraysEqual(left.referenceUrls, right.referenceUrls)
-  && areRelatedComponentsEqual(left.relatedComponents, right.relatedComponents)
-  && left.severityClassName === right.severityClassName
-  && left.severityText === right.severityText
-  && left.sourceText === right.sourceText
-  && left.summaryMarkdown === right.summaryMarkdown
-  && left.titleText === right.titleText
-  && left.triageLabel === right.triageLabel
-  && left.triagePending === right.triagePending
-  && left.triageState === right.triageState
-  && areStringArraysEqual(left.unmappedSbomLabels, right.unmappedSbomLabels);
-
 export const buildVulnRowViewModel = (
   vulnerability: Vulnerability,
   options: {
