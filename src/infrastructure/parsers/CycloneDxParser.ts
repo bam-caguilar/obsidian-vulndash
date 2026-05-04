@@ -411,6 +411,9 @@ export const parseCycloneDxJson = (
     if (version) {
       normalized.version = version;
     }
+    if (componentRef) {
+      normalized.bomRef = componentRef;
+    }
     if (supplier) {
       normalized.supplier = supplier;
     }

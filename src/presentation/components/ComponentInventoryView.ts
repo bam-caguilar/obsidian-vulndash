@@ -155,9 +155,14 @@ export class ComponentInventoryView {
     }
 
     const snapshot = this.loadState.status === 'ready' ? this.loadState.snapshot : null;
+    const derivedState = snapshot
+      ? deriveComponentInventoryState(snapshot, this.filters)
+      : null;
     this.filterBar.render(this.filterHostEl, {
       availableFormats: snapshot?.inventory.catalog.formats ?? [],
-      availableSourceFiles: snapshot?.inventory.catalog.sourceFiles ?? [],
+      availableProjects: derivedState?.availableProjects ?? [],
+      availableSourceFiles: derivedState?.availableSourceFiles ?? [],
+      availableSboms: derivedState?.availableSboms ?? [],
       filters: this.filters
     });
   }
@@ -342,7 +347,7 @@ export class ComponentInventoryView {
     const table = tableShell.createEl('table', { cls: 'vulndash-component-table' });
     const head = table.createEl('thead');
     const headRow = head.createEl('tr');
-    for (const label of ['Component', 'License', 'Identifier', 'Sources', 'Vulnerabilities', 'Actions']) {
+    for (const label of ['Project', 'SBOM File', 'Component', 'Version', 'Identifier', 'Vulnerabilities', 'Actions']) {
       headRow.createEl('th', { text: label });
     }
 
@@ -371,7 +376,8 @@ export class ComponentInventoryView {
         },
         onUnfollow: (trackedComponent) => {
           void this.handlePreferenceAction(trackedComponent.key, 'unfollow');
-        }
+        },
+        visibleSources: entry.visibleSources
       };
       if (entry.highestSeverity) {
         rowCallbacks.effectiveHighestSeverity = entry.highestSeverity;

@@ -3,6 +3,7 @@ import type { Severity } from '../../domain/value-objects/Severity';
 import type { NormalizedSbomDocument } from '../../domain/sbom/types';
 import type { TriageFilterMode } from '../triage/FilterByTriageState';
 import type { TriageState } from '../../domain/triage/TriageState';
+import type { Project } from '../../domain/project/Project';
 
 export type DashboardSortOrder = 'publishedAt' | 'cvssScore';
 export type DashboardDateField = 'published' | 'modified';
@@ -103,6 +104,8 @@ export interface ImportedSbomConfig {
   enabled: boolean;
   lastImportedAt: number;
   contentHash: string;
+  projectId: string;
+  projectNameSnapshot: string;
   namespace?: string;
   componentCount?: number;
   lastError?: string;
@@ -153,6 +156,7 @@ export interface VulnDashSettings {
   enableNvdFeed: boolean;
   enableGithubFeed: boolean;
   dailyRollup: DailyRollupSettings;
+  projects: Project[];
   sboms: ImportedSbomConfig[];
   sbomOverrides: Record<string, SbomComponentOverride>;
   sbomImportMode: 'replace' | 'append';

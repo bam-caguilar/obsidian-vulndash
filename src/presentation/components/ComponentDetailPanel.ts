@@ -235,8 +235,19 @@ export class ComponentDetailsRenderer extends Component {
           const safePath = this.escapeInlineCode(
             this.toSafeText(source.sourcePath, 'Unknown Path')
           );
+          const safeProjectName = this.escapeMd(
+            this.toSafeText(source.projectName, 'Unassigned Project')
+          );
+          const safeSbomFileName = this.escapeInlineCode(
+            this.toSafeText(source.sbomFileName, 'Unknown SBOM')
+          );
 
-          return `- **${documentName}** (${this.escapeMd(format)}${versionStr})\n  - Path: \`${safePath}\``;
+          return [
+            `- **${documentName}** (${this.escapeMd(format)}${versionStr})`,
+            `  - Project: ${safeProjectName}`,
+            `  - SBOM File: \`${safeSbomFileName}\``,
+            `  - Path: \`${safePath}\``
+          ].join('\n');
         })
         .join('\n\n');
     } else {

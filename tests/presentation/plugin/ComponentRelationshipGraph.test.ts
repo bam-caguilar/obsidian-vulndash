@@ -4,46 +4,87 @@ import type {
   ComponentQueryMatch,
   ComponentInventorySnapshot,
   ComponentRelationshipGraph,
-  TrackedComponent
+  TrackedComponent,
+  TrackedComponentSource
 } from '../../../src/application/sbom/types';
 import type { Vulnerability } from '../../../src/domain/entities/Vulnerability';
+import type { ComponentOccurrence } from '../../../src/domain/sbom/ComponentOccurrence';
 import { buildComponentRelationshipGraphFromCache } from '../../../src/presentation/plugin/ComponentRelationshipGraph';
 
-const createComponent = (overrides: Partial<TrackedComponent> = {}): TrackedComponent => ({
-  cweGroups: [],
-  formats: ['cyclonedx'],
-  isEnabled: true,
-  isFollowed: false,
-  key: 'purl:pkg:npm/widget@1.2.3',
+const createSource = (
+  overrides: Partial<TrackedComponentSource> = {}
+): TrackedComponentSource => ({
+  componentId: 'component-1',
+  componentKey: 'purl:pkg:npm/widget@1.2.3',
+  documentName: 'sbom',
+  format: 'cyclonedx',
+  id: 'component-occurrence::sbom-1::component-1',
   name: 'widget',
-  sourceFiles: ['reports/sbom.json'],
-  sources: [{
-    componentId: 'component-1',
-    documentName: 'sbom',
-    format: 'cyclonedx',
-    name: 'widget',
-    sourcePath: 'reports/sbom.json',
-    version: '1.2.3'
-  }],
-  vulnerabilities: [],
+  projectId: 'project::portal-web',
+  projectName: 'Portal Web',
+  sbomFileName: 'sbom.json',
+  sbomId: 'sbom-1',
+  sbomLabel: 'sbom',
+  sourcePath: 'reports/sbom.json',
   vulnerabilityCount: 0,
+  vulnerabilityIds: [],
   version: '1.2.3',
   ...overrides
 });
 
-const createInventory = (components: TrackedComponent[]): ComponentInventorySnapshot => ({
-  catalog: {
-    componentCount: components.length,
-    components,
+const createComponent = (overrides: Partial<TrackedComponent> = {}): TrackedComponent => {
+  const base: TrackedComponent = {
+    cweGroups: [],
     formats: ['cyclonedx'],
-    sourceFiles: ['reports/sbom.json']
-  },
-  configuredSbomCount: 1,
-  enabledSbomCount: 1,
-  failedSbomCount: 0,
-  issues: [],
-  parsedSbomCount: 1
-});
+    isEnabled: true,
+    isFollowed: false,
+    key: 'purl:pkg:npm/widget@1.2.3',
+    name: 'widget',
+    sourceFiles: ['reports/sbom.json'],
+    sources: [],
+    vulnerabilities: [],
+    vulnerabilityCount: 0,
+    version: '1.2.3'
+  };
+  const component = {
+    ...base,
+    ...overrides
+  };
+
+  return {
+    ...component,
+    sources: overrides.sources ?? [createSource({
+      componentKey: component.key,
+      name: component.name,
+      vulnerabilityCount: component.vulnerabilityCount,
+      vulnerabilityIds: component.vulnerabilities.map((vulnerability) => vulnerability.id),
+      ...(component.purl ? { purl: component.purl } : {}),
+      ...(component.version ? { version: component.version } : {})
+    })]
+  };
+};
+
+const createInventory = (components: TrackedComponent[]): ComponentInventorySnapshot => {
+  const occurrences = components.flatMap((component) => component.sources);
+  const occurrenceCount = occurrences.length;
+
+  return {
+    catalog: {
+      componentCount: components.length,
+      components,
+      formats: ['cyclonedx'],
+      occurrenceCount,
+      sourceFiles: ['reports/sbom.json']
+    },
+    configuredSbomCount: 1,
+    enabledSbomCount: 1,
+    failedSbomCount: 0,
+    issues: [],
+    occurrences,
+    occurrenceCount,
+    parsedSbomCount: 1
+  };
+};
 
 const createVulnerability = (id: string): Vulnerability => ({
   affectedProducts: ['widget'],
@@ -63,17 +104,20 @@ test('buildComponentRelationshipGraphFromCache always uses cached vulnerabilitie
   const inventory = createInventory(components);
   const cachedVulnerabilities = [createVulnerability('OSV-2026-1'), createVulnerability('OSV-2026-2')];
   let capturedComponents: readonly TrackedComponent[] | null = null;
+  let capturedOccurrences: readonly ComponentOccurrence[] | null = null;
   let capturedVulnerabilities: readonly Vulnerability[] | null = null;
 
   const graph: ComponentRelationshipGraph = {
     componentsByVulnerability: new Map(),
     relationships: [],
-    vulnerabilitiesByComponent: new Map()
+    vulnerabilitiesByComponent: new Map(),
+    vulnerabilitiesByOccurrence: new Map()
   };
 
   const result = buildComponentRelationshipGraphFromCache({
-    buildGraph: (receivedComponents, receivedVulnerabilities) => {
+    buildGraph: (receivedComponents, receivedOccurrences, receivedVulnerabilities) => {
       capturedComponents = receivedComponents;
+      capturedOccurrences = receivedOccurrences;
       capturedVulnerabilities = receivedVulnerabilities;
       return graph;
     }
@@ -81,6 +125,7 @@ test('buildComponentRelationshipGraphFromCache always uses cached vulnerabilitie
 
   assert.equal(result, graph);
   assert.equal(capturedComponents, inventory.catalog.components);
+  assert.equal(capturedOccurrences, inventory.occurrences);
   assert.deepEqual(capturedVulnerabilities, cachedVulnerabilities);
   assert.notEqual(capturedVulnerabilities, cachedVulnerabilities);
 });
@@ -104,12 +149,13 @@ test('buildComponentRelationshipGraphFromCache forwards purl query cache matches
     | undefined;
 
   buildComponentRelationshipGraphFromCache({
-    buildGraph: (_receivedComponents, _receivedVulnerabilities, options) => {
+    buildGraph: (_receivedComponents, _receivedOccurrences, _receivedVulnerabilities, options) => {
       capturedOptions = options;
       return {
         componentsByVulnerability: new Map(),
         relationships: [],
-        vulnerabilitiesByComponent: new Map()
+        vulnerabilitiesByComponent: new Map(),
+        vulnerabilitiesByOccurrence: new Map()
       };
     }
   }, inventory, cachedVulnerabilities, { purlQueryCacheMatches: queryMatches });

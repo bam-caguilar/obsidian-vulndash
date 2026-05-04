@@ -1,8 +1,12 @@
 import type { RollupFinding } from '../../domain/rollup/RollupFinding';
+import { UNASSIGNED_PROJECT_NAME } from '../../domain/project/ProjectName';
 import { formatTriageStateLabel } from '../../domain/triage/TriageState';
+import type { ResolvedBriefingScope } from '../briefing/BriefingScopeService';
 import {
   DailyRollupMarkdownComposer,
   type DailyRollupFindingInput,
+  type DailyRollupProjectSectionInput,
+  type DailyRollupProjectSummaryRowInput,
   type DailyRollupMarkdownComposerInput
 } from '../markdown/DailyRollupMarkdownComposer';
 
@@ -14,6 +18,7 @@ export interface ManagedMarkdownSection {
 export interface RenderedDailyRollup {
   readonly analystNotesHeading: string;
   readonly analystNotesPlaceholder: string;
+  readonly fileName: string;
   readonly managedSections: readonly ManagedMarkdownSection[];
   readonly title: string;
 }
@@ -21,6 +26,7 @@ export interface RenderedDailyRollup {
 export interface RenderDailyRollupInput {
   readonly date: string;
   readonly findings: readonly RollupFinding[];
+  readonly scope: ResolvedBriefingScope;
 }
 
 const asSentence = (value: string): string => {
@@ -46,20 +52,63 @@ const safeInline = (value: string | null | undefined, fallback = 'Not provided')
   return normalized && normalized.length > 0 ? normalized : fallback;
 };
 
+interface ProjectSectionAccumulator {
+  criticalCount: number;
+  findings: RollupFinding[];
+  highCount: number;
+  lowCount: number;
+  mediumCount: number;
+  notePath?: string;
+  projectName: string;
+  sbomLabels: Set<string>;
+  topComponents: Map<string, {
+    componentName: string;
+    sbomLabels: Set<string>;
+    vulnerabilityIds: Set<string>;
+  }>;
+}
+
+const normalizeComponentName = (component: { name: string; version?: string; ecosystem?: string }): string =>
+  [
+    component.name.trim(),
+    component.version?.trim(),
+    component.ecosystem?.trim()
+  ].filter(Boolean).join(' ');
+
+const compareProjectSections = (
+  left: ProjectSectionAccumulator,
+  right: ProjectSectionAccumulator
+): number => {
+  if (left.projectName === UNASSIGNED_PROJECT_NAME && right.projectName !== UNASSIGNED_PROJECT_NAME) {
+    return 1;
+  }
+  if (right.projectName === UNASSIGNED_PROJECT_NAME && left.projectName !== UNASSIGNED_PROJECT_NAME) {
+    return -1;
+  }
+
+  return left.projectName.localeCompare(right.projectName)
+    || (left.notePath ?? '').localeCompare(right.notePath ?? '');
+};
+
 export class RollupMarkdownRenderer {
   public constructor(
     private readonly composer: DailyRollupMarkdownComposer = new DailyRollupMarkdownComposer()
   ) {}
 
   public render(input: RenderDailyRollupInput): RenderedDailyRollup {
-    const composerInput = this.mapToComposerInput(input.date, input.findings);
-    const composedMarkdown = this.composer.compose(composerInput);
-    const title = `# ${composerInput.title ?? `Daily Rollup - ${input.date}`}`;
+    const composerInput = this.mapToComposerInput(input.date, input.findings, input.scope);
+    const scopedComposerInput = {
+      ...composerInput,
+      scopeLabel: input.scope.displayLabel
+    };
+    const composedMarkdown = this.composer.compose(scopedComposerInput);
+    const title = `# ${scopedComposerInput.title ?? `Daily Rollup - ${input.date}`}`;
     const body = this.stripLeadingTitleHeading(composedMarkdown, title);
 
     return {
       analystNotesHeading: '## Analyst Notes',
       analystNotesPlaceholder: '- Add analyst notes, escalation context, and follow-up decisions here.',
+      fileName: `${scopedComposerInput.title ?? `Daily Rollup - ${input.date}`}.md`,
       managedSections: [
         {
           key: 'daily-rollup',
@@ -72,16 +121,173 @@ export class RollupMarkdownRenderer {
 
   private mapToComposerInput(
     date: string,
-    findings: readonly RollupFinding[]
+    findings: readonly RollupFinding[],
+    scope?: ResolvedBriefingScope
   ): DailyRollupMarkdownComposerInput {
     const sortedFindings = this.sortFindings(findings);
+    const titleSuffix = scope && scope.scope.type !== 'all-projects'
+      ? ` - ${scope.displayLabel}`
+      : '';
+    const groupedByProject = scope
+      ? scope.scope.type === 'all-projects' || scope.scope.type === 'multiple-projects'
+      : false;
+    const groupedSections = groupedByProject
+      ? this.buildProjectSections(sortedFindings)
+      : [];
 
     return {
       generatedAt: date,
       dateLabel: date,
-      title: `VulnDash Briefing ${date}`,
-      summary: this.buildSummary(sortedFindings),
+      ...(groupedSections.length > 0 ? {
+        executiveSummaryRows: this.buildExecutiveSummaryRows(groupedSections),
+        projectSections: groupedSections.map((section) => this.mapProjectSection(section))
+      } : {}),
+      title: `VulnDash Briefing ${date}${titleSuffix}`,
+      summary: this.buildSummary(sortedFindings, scope),
       findings: sortedFindings.map((finding) => this.mapFinding(finding))
+    };
+  }
+
+  private buildProjectSections(findings: readonly RollupFinding[]): ProjectSectionAccumulator[] {
+    const sections = new Map<string, ProjectSectionAccumulator>();
+
+    const ensureSection = (
+      projectName: string,
+      notePath?: string
+    ): ProjectSectionAccumulator => {
+      const key = `${projectName}::${notePath ?? ''}`;
+      const existing = sections.get(key);
+      if (existing) {
+        return existing;
+      }
+
+      const created: ProjectSectionAccumulator = {
+        criticalCount: 0,
+        findings: [],
+        highCount: 0,
+        lowCount: 0,
+        mediumCount: 0,
+        ...(notePath ? { notePath } : {}),
+        projectName,
+        sbomLabels: new Set<string>(),
+        topComponents: new Map()
+      };
+      sections.set(key, created);
+      return created;
+    };
+
+    for (const finding of findings) {
+      for (const project of finding.affectedProjects) {
+        const section = ensureSection(project.displayName, project.notePath);
+        this.addFindingToProjectSection(section, finding, project.sourceSbomLabels);
+      }
+
+      if (finding.unmappedSboms.length > 0) {
+        const section = ensureSection(UNASSIGNED_PROJECT_NAME);
+        this.addFindingToProjectSection(
+          section,
+          finding,
+          finding.unmappedSboms.map((sbom) => sbom.sbomLabel)
+        );
+      }
+    }
+
+    return Array.from(sections.values()).sort(compareProjectSections);
+  }
+
+  private addFindingToProjectSection(
+    section: ProjectSectionAccumulator,
+    finding: RollupFinding,
+    sbomLabels: readonly string[]
+  ): void {
+    if (!section.findings.some((candidate) => candidate.key === finding.key)) {
+      section.findings.push(finding);
+      this.incrementSeverityCount(section, finding);
+    }
+
+    for (const sbomLabel of sbomLabels.map((value) => value.trim()).filter(Boolean)) {
+      section.sbomLabels.add(sbomLabel);
+    }
+
+    for (const component of this.extractMatchedComponents(finding) ?? []) {
+      const componentName = normalizeComponentName(component);
+      if (!componentName) {
+        continue;
+      }
+
+      const existing = section.topComponents.get(componentName) ?? {
+        componentName,
+        sbomLabels: new Set<string>(),
+        vulnerabilityIds: new Set<string>()
+      };
+      for (const sbomLabel of sbomLabels.map((value) => value.trim()).filter(Boolean)) {
+        existing.sbomLabels.add(sbomLabel);
+      }
+      existing.vulnerabilityIds.add(finding.vulnerability.id);
+      section.topComponents.set(componentName, existing);
+    }
+  }
+
+  private incrementSeverityCount(section: ProjectSectionAccumulator, finding: RollupFinding): void {
+    const severity = safeInline(finding.vulnerability.severity, 'UNKNOWN').toUpperCase();
+    switch (severity) {
+      case 'CRITICAL':
+        section.criticalCount += 1;
+        break;
+      case 'HIGH':
+        section.highCount += 1;
+        break;
+      case 'MEDIUM':
+        section.mediumCount += 1;
+        break;
+      case 'LOW':
+        section.lowCount += 1;
+        break;
+      default:
+        break;
+    }
+  }
+
+  private buildExecutiveSummaryRows(
+    sections: readonly ProjectSectionAccumulator[]
+  ): DailyRollupProjectSummaryRowInput[] {
+    return sections.map((section) => ({
+      criticalCount: section.criticalCount,
+      highCount: section.highCount,
+      lowCount: section.lowCount,
+      mediumCount: section.mediumCount,
+      projectName: section.projectName,
+      ...(section.notePath ? { projectTarget: section.notePath } : {}),
+      sbomCount: section.sbomLabels.size,
+      vulnerabilityCount: section.findings.length
+    }));
+  }
+
+  private mapProjectSection(
+    section: ProjectSectionAccumulator
+  ): DailyRollupProjectSectionInput {
+    const topComponents = Array.from(section.topComponents.values())
+      .map((component) => ({
+        componentName: component.componentName,
+        sbomSummary: Array.from(component.sbomLabels).sort((left, right) => left.localeCompare(right)).join(', '),
+        vulnerabilityCount: component.vulnerabilityIds.size
+      }))
+      .sort((left, right) =>
+        right.vulnerabilityCount - left.vulnerabilityCount
+        || left.componentName.localeCompare(right.componentName))
+      .slice(0, 10);
+
+    return {
+      criticalCount: section.criticalCount,
+      findings: this.sortFindings(section.findings).map((finding) => this.mapFinding(finding)),
+      highCount: section.highCount,
+      lowCount: section.lowCount,
+      mediumCount: section.mediumCount,
+      projectName: section.projectName,
+      ...(section.notePath ? { projectTarget: section.notePath } : {}),
+      sbomLabels: Array.from(section.sbomLabels).sort((left, right) => left.localeCompare(right)),
+      topComponents,
+      vulnerabilityCount: section.findings.length
     };
   }
 
@@ -144,8 +350,12 @@ export class RollupMarkdownRenderer {
     return components.length > 0 ? components : undefined;
   }
 
-  private buildSummary(findings: readonly RollupFinding[]): string {
+  private buildSummary(findings: readonly RollupFinding[], scope?: ResolvedBriefingScope): string {
     if (findings.length === 0) {
+      if (scope && scope.scope.type !== 'all-projects') {
+        return `No findings matched the daily briefing policy for ${scope.displayLabel}.`;
+      }
+
       return 'No findings matched the daily briefing policy for this date.';
     }
 
@@ -180,6 +390,10 @@ export class RollupMarkdownRenderer {
       summaryParts.push(
         `${unmappedCount} finding${unmappedCount === 1 ? '' : 's'} still require project mapping`
       );
+    }
+
+    if (scope && scope.scope.type !== 'all-projects') {
+      summaryParts.unshift(`Scope: ${scope.displayLabel}`);
     }
 
     return asSentence(summaryParts.join('; '));

@@ -17,10 +17,43 @@ export interface DailyRollupFindingInput {
   rationale?: string;
 }
 
+export interface DailyRollupProjectSummaryRowInput {
+  criticalCount: number;
+  highCount: number;
+  lowCount: number;
+  mediumCount: number;
+  projectName: string;
+  projectTarget?: string;
+  sbomCount: number;
+  vulnerabilityCount: number;
+}
+
+export interface DailyRollupTopComponentInput {
+  componentName: string;
+  sbomSummary: string;
+  vulnerabilityCount: number;
+}
+
+export interface DailyRollupProjectSectionInput {
+  criticalCount: number;
+  findings: DailyRollupFindingInput[];
+  highCount: number;
+  lowCount: number;
+  mediumCount: number;
+  projectName: string;
+  projectTarget?: string;
+  sbomLabels: string[];
+  topComponents: DailyRollupTopComponentInput[];
+  vulnerabilityCount: number;
+}
+
 export interface DailyRollupMarkdownComposerInput {
+  executiveSummaryRows?: DailyRollupProjectSummaryRowInput[];
   generatedAt: string;
   dateLabel: string;
   findings: DailyRollupFindingInput[];
+  projectSections?: DailyRollupProjectSectionInput[];
+  scopeLabel?: string;
   title?: string;
   summary?: string;
 }
@@ -51,6 +84,7 @@ export class DailyRollupMarkdownComposer {
 
     builder.callout('summary', 'Rollup Summary', [
       `Generated At: ${input.generatedAt}`,
+      ...(input.scopeLabel?.trim() ? [`Scope: ${MarkdownBuilder.bold(input.scopeLabel.trim())}`] : []),
       `Findings: ${MarkdownBuilder.bold(String(sortedFindings.length))}`,
       `Critical / High: ${MarkdownBuilder.bold(String(this.countCriticalHigh(sortedFindings)))}`
     ]);
@@ -61,8 +95,15 @@ export class DailyRollupMarkdownComposer {
 
     if (sortedFindings.length === 0) {
       builder.callout('success', 'No Findings Selected', [
-        'No findings met the current rollup selection criteria.'
+        input.scopeLabel?.trim()
+          ? `No findings met the current rollup selection criteria for ${input.scopeLabel.trim()}.`
+          : 'No findings met the current rollup selection criteria.'
       ]);
+      return builder.build();
+    }
+
+    if ((input.projectSections?.length ?? 0) > 0) {
+      this.composeGroupedByProject(builder, input);
       return builder.build();
     }
 
@@ -84,72 +125,162 @@ export class DailyRollupMarkdownComposer {
     builder.h2('Detailed Findings');
 
     for (const finding of sortedFindings) {
-      const vulnerability = finding.vulnerability;
-      const identifier = this.support.getPrimaryIdentifier(vulnerability) ?? vulnerability.id;
+      this.appendFindingDetails(builder, finding);
+    }
 
-      builder.h3(identifier);
+    return builder.build();
+  }
 
-      builder.callout(
-        this.support.getSeverityCalloutType(String(vulnerability.severity)),
-        'Finding Summary',
-        [
-          `Severity: ${MarkdownBuilder.bold(String(vulnerability.severity))}`,
-          `Title: ${vulnerability.title}`,
-          `Published: ${vulnerability.publishedAt}`,
-          `Updated: ${vulnerability.updatedAt}`,
-          ...(finding.triageState ? [`Triage: ${finding.triageState}`] : [])
+  private composeGroupedByProject(
+    builder: MarkdownBuilder,
+    input: DailyRollupMarkdownComposerInput
+  ): void {
+    const projectSections = input.projectSections ?? [];
+    const executiveSummaryRows = input.executiveSummaryRows ?? [];
+
+    builder.h2('Executive Summary');
+    builder.table({
+      headers: ['Project', 'SBOMs', 'Critical', 'High', 'Medium', 'Low', 'Total'],
+      rows: executiveSummaryRows.map((row) => [
+        row.projectTarget
+          ? this.support.formatProjectLink(row.projectTarget, row.projectName)
+          : row.projectName,
+        row.sbomCount,
+        row.criticalCount,
+        row.highCount,
+        row.mediumCount,
+        row.lowCount,
+        row.vulnerabilityCount
+      ])
+    });
+
+    for (const section of projectSections) {
+      builder.h2(`Project: ${section.projectName}`);
+
+      if (section.projectTarget?.trim()) {
+        builder.paragraph(`Linked note: ${this.support.formatProjectLink(section.projectTarget, section.projectName)}`);
+      }
+
+      builder.h3('SBOMs');
+      builder.unorderedList(section.sbomLabels.map((sbomLabel) => MarkdownBuilder.inlineCode(sbomLabel)));
+
+      builder.h3('Vulnerability Summary');
+      builder.table({
+        headers: ['Severity', 'Count'],
+        rows: [
+          ['Critical', section.criticalCount],
+          ['High', section.highCount],
+          ['Medium', section.mediumCount],
+          ['Low', section.lowCount],
+          ['Total', section.vulnerabilityCount]
         ]
-      );
+      });
 
-      if (vulnerability.summary.trim()) {
-        builder.paragraph(vulnerability.summary.trim());
-      }
-
-      const metadata = this.support.buildMetadataItems(vulnerability);
-      if (metadata.length > 0) {
-        builder.definitionList(metadata);
-      }
-
-      if (finding.rationale?.trim()) {
-        builder.h4('Selection Rationale');
-        builder.paragraph(finding.rationale.trim());
-      }
-
-      const projectLinks = this.buildProjectLinks(finding.affectedProjects);
-      if (projectLinks.length > 0) {
-        builder.h4('Affected Projects');
-        builder.unorderedList(projectLinks);
-      }
-
-      const componentLinks = this.buildComponentLinks(finding.matchedComponents);
-      if (componentLinks.length > 0) {
-        builder.h4('Matched Components');
-        builder.unorderedList(componentLinks);
-      }
-
-      const packageRows = this.support.buildAffectedPackageTableRows(vulnerability);
-      if (packageRows.length > 0) {
-        builder.h4('Affected Packages');
+      if (section.topComponents.length > 0) {
+        builder.h3('Top Vulnerable Components');
         builder.table({
-          headers: ['Package', 'Ecosystem', 'Vulnerable Range', 'First Patched', 'Vendor'],
-          rows: packageRows.map((row) => [
-            row.packageLink,
-            row.ecosystem,
-            row.vulnerableVersionRange,
-            row.firstPatchedVersion,
-            row.vendor
+          headers: ['Component', 'SBOMs', 'Vulnerabilities'],
+          rows: section.topComponents.map((component) => [
+            component.componentName,
+            component.sbomSummary,
+            component.vulnerabilityCount
           ])
         });
       }
 
-      const references = this.support.buildReferenceLinks(vulnerability);
-      if (references.length > 0) {
-        builder.h4('References');
-        builder.unorderedList(references);
+      builder.h3('Vulnerabilities');
+      builder.table({
+        headers: ['Severity', 'Identifier', 'Title', 'Components'],
+        rows: section.findings.map((finding) => [
+          finding.vulnerability.severity,
+          this.support.formatVulnerabilityLink(
+            finding.vulnerability,
+            this.support.getPrimaryIdentifier(finding.vulnerability)
+          ),
+          finding.vulnerability.title,
+          this.formatComponentSummary(finding.matchedComponents)
+        ])
+      });
+
+      builder.h3('Detailed Findings');
+      for (const finding of section.findings) {
+        this.appendFindingDetails(builder, finding, 4);
       }
     }
+  }
 
-    return builder.build();
+  private appendFindingDetails(
+    builder: MarkdownBuilder,
+    finding: DailyRollupFindingInput,
+    headingLevel: 3 | 4 = 3
+  ): void {
+    const vulnerability = finding.vulnerability;
+    const identifier = this.support.getPrimaryIdentifier(vulnerability) ?? vulnerability.id;
+
+    if (headingLevel === 4) {
+      builder.h4(identifier);
+    } else {
+      builder.h3(identifier);
+    }
+
+    builder.callout(
+      this.support.getSeverityCalloutType(String(vulnerability.severity)),
+      'Finding Summary',
+      [
+        `Severity: ${MarkdownBuilder.bold(String(vulnerability.severity))}`,
+        `Title: ${vulnerability.title}`,
+        `Published: ${vulnerability.publishedAt}`,
+        `Updated: ${vulnerability.updatedAt}`,
+        ...(finding.triageState ? [`Triage: ${finding.triageState}`] : [])
+      ]
+    );
+
+    if (vulnerability.summary.trim()) {
+      builder.paragraph(vulnerability.summary.trim());
+    }
+
+    const metadata = this.support.buildMetadataItems(vulnerability);
+    if (metadata.length > 0) {
+      builder.definitionList(metadata);
+    }
+
+    if (finding.rationale?.trim()) {
+      builder.h4('Selection Rationale');
+      builder.paragraph(finding.rationale.trim());
+    }
+
+    const projectLinks = this.buildProjectLinks(finding.affectedProjects);
+    if (projectLinks.length > 0) {
+      builder.h4('Affected Projects');
+      builder.unorderedList(projectLinks);
+    }
+
+    const componentLinks = this.buildComponentLinks(finding.matchedComponents);
+    if (componentLinks.length > 0) {
+      builder.h4('Matched Components');
+      builder.unorderedList(componentLinks);
+    }
+
+    const packageRows = this.support.buildAffectedPackageTableRows(vulnerability);
+    if (packageRows.length > 0) {
+      builder.h4('Affected Packages');
+      builder.table({
+        headers: ['Package', 'Ecosystem', 'Vulnerable Range', 'First Patched', 'Vendor'],
+        rows: packageRows.map((row) => [
+          row.packageLink,
+          row.ecosystem,
+          row.vulnerableVersionRange,
+          row.firstPatchedVersion,
+          row.vendor
+        ])
+      });
+    }
+
+    const references = this.support.buildReferenceLinks(vulnerability);
+    if (references.length > 0) {
+      builder.h4('References');
+      builder.unorderedList(references);
+    }
   }
 
   private buildProjectLinks(

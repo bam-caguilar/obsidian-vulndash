@@ -80,7 +80,7 @@ export const DEFAULT_SYNC_CONTROLS: SyncControls = {
   debugHttpMetadata: false
 };
 
-export const SETTINGS_VERSION = 10;
+export const SETTINGS_VERSION = 11;
 
 export const DEFAULT_SETTINGS: VulnDashSettings = {
   pollingIntervalMs: 60_000,
@@ -108,6 +108,7 @@ export const DEFAULT_SETTINGS: VulnDashSettings = {
   enableNvdFeed: true,
   enableGithubFeed: true,
   dailyRollup: { ...DEFAULT_DAILY_ROLLUP_SETTINGS },
+  projects: [],
   sboms: [],
   sbomOverrides: {},
   sbomImportMode: 'append',

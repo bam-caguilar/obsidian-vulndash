@@ -599,6 +599,7 @@
 }
 
 .vulndash-sbom-field input,
+.vulndash-sbom-field select,
 .vulndash-sbom-component-field input,
 .vulndash-sbom-compare-select select {
   width: 100%;
@@ -667,6 +668,38 @@
 .vulndash-sbom-file-suggestion-path {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
+}
+
+.vulndash-project-name-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.vulndash-project-name-actions {
+  justify-content: flex-end;
+}
+
+.vulndash-project-quick-picks {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.vulndash-briefing-scope-form,
+.vulndash-briefing-scope-checkboxes {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.vulndash-project-quick-pick-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.vulndash-sbom-details-grid .vulndash-sbom-summary-value {
+  font-size: var(--font-ui-medium);
+  line-height: 1.35;
+  word-break: break-word;
 }
 
 /* ==========================================================================
@@ -938,24 +971,27 @@
   justify-content: left;
 }
 
-/* Column Widths for 9-column layout */
+/* Column widths for the component inventory table */
 .vulndash-component-table th:nth-child(1),
-.vulndash-component-table td:nth-child(1) { width: 30%; } /* Component */
+.vulndash-component-table td:nth-child(1) { width: 14%; } /* Project */
 
 .vulndash-component-table th:nth-child(2),
-.vulndash-component-table td:nth-child(2) { width: 12%; } /* License */
+.vulndash-component-table td:nth-child(2) { width: 16%; } /* SBOM file */
 
 .vulndash-component-table th:nth-child(3),
-.vulndash-component-table td:nth-child(3) { width: 30%; } /* Identifier */
+.vulndash-component-table td:nth-child(3) { width: 24%; } /* Component */
 
 .vulndash-component-table th:nth-child(4),
-.vulndash-component-table td:nth-child(4) { width: 5%; } /* Sources */
+.vulndash-component-table td:nth-child(4) { width: 10%; } /* Version */
 
 .vulndash-component-table th:nth-child(5),
-.vulndash-component-table td:nth-child(5) { width: 5%; } /* Vulnerabilities */
+.vulndash-component-table td:nth-child(5) { width: 20%; } /* Identifier */
 
 .vulndash-component-table th:nth-child(6),
-.vulndash-component-table td:nth-child(6) { width: 18%; } /* Actions */
+.vulndash-component-table td:nth-child(6) { width: 8%; } /* Vulnerabilities */
+
+.vulndash-component-table th:nth-child(7),
+.vulndash-component-table td:nth-child(7) { width: 18%; } /* Actions */
 
 
 .vulndash-component-row.is-followed {
@@ -975,6 +1011,7 @@
 }
 
 .vulndash-component-name-stack,
+.vulndash-component-source-stack,
 .vulndash-component-vuln-stack {
   display: grid;
   gap: 0.3rem;

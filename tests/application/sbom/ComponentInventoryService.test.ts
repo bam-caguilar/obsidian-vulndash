@@ -15,6 +15,8 @@ const createSbom = (overrides: Partial<ImportedSbomConfig> = {}): ImportedSbomCo
   label: 'Primary SBOM',
   lastImportedAt: 0,
   path: 'reports/primary.cdx.json',
+  projectId: 'project::unassigned',
+  projectNameSnapshot: 'Unassigned Project',
   ...overrides
 });
 

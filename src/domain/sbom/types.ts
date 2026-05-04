@@ -37,6 +37,7 @@ export interface NormalizedVulnerability {
 }
 
 export interface NormalizedComponent {
+  bomRef?: string;
   cweGroups: NormalizedCweGroup[];
   id: string;
   name: string;

@@ -11,6 +11,7 @@ export interface ComponentRowRendererCallbacks extends ComponentDetailPanelCallb
   relatedVulnerabilities?: readonly RelatedVulnerabilitySummary[];
   onToggleExpanded: (componentKey: string, expanded: boolean) => void;
   onUnfollow: (component: TrackedComponent) => void;
+  visibleSources?: readonly TrackedComponent['sources'][number][];
 }
 
 const formatSeverity = (severity: string | undefined): string =>
@@ -50,6 +51,24 @@ const createBadge = (
   });
 };
 
+const uniqueValues = (values: ReadonlyArray<string | undefined>): string[] =>
+  Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))));
+
+const renderValueStack = (
+  containerEl: HTMLElement,
+  primary: string,
+  secondary?: string
+): void => {
+  const stack = containerEl.createDiv({ cls: 'vulndash-component-source-stack' });
+  stack.createEl('strong', { text: primary });
+  if (secondary) {
+    stack.createDiv({
+      cls: 'vulndash-muted-copy',
+      text: secondary
+    });
+  }
+};
+
 export const renderComponentRow = (
   tableBodyEl: HTMLElement,
   component: TrackedComponent,
@@ -58,16 +77,33 @@ export const renderComponentRow = (
 ): void => {
   const effectiveVulnerabilityCount = callbacks.effectiveVulnerabilityCount;
   const effectiveHighestSeverity = callbacks.effectiveHighestSeverity ?? component.highestSeverity;
+  const visibleSources = callbacks.visibleSources ?? component.sources;
+  const projectNames = uniqueValues(visibleSources.map((source) => source.projectName));
+  const sbomFileNames = uniqueValues(visibleSources.map((source) => source.sbomFileName));
   const row = tableBodyEl.createEl('tr', {
     cls: getRowClasses(component, expanded, effectiveVulnerabilityCount).join(' ')
   });
+
+  const projectCell = row.createEl('td');
+  renderValueStack(
+    projectCell,
+    projectNames[0] ?? 'Unassigned Project',
+    projectNames.length > 1 ? `${projectNames.length} projects in scope` : undefined
+  );
+
+  const sbomCell = row.createEl('td');
+  renderValueStack(
+    sbomCell,
+    sbomFileNames[0] ?? 'Unknown SBOM',
+    sbomFileNames.length > 1 ? `${sbomFileNames.length} SBOM files in scope` : undefined
+  );
 
   const nameCell = row.createEl('td');
   const nameStack = nameCell.createDiv({ cls: 'vulndash-component-name-stack' });
   nameStack.createEl('strong', { text: component.name });
   nameStack.createDiv({
     cls: 'vulndash-muted-copy',
-    text: [component.version ?? 'No version', component.supplier ?? 'Unknown supplier'].join(' • ')
+    text: component.supplier ?? 'Unknown supplier'
   });
   const stateBadges = nameStack.createDiv({ cls: 'vulndash-component-chip-list' });
   if (component.isFollowed) {
@@ -84,15 +120,11 @@ export const renderComponentRow = (
     );
   }
 
-  row.createEl('td', {
-    cls: 'vulndash-component-table-mono',
-    text: component.license ?? 'Unknown'
-  });
+  row.createEl('td', { text: component.version ?? 'No version' });
   row.createEl('td', {
     cls: 'vulndash-component-table-mono',
     text: component.purl ?? component.cpe ?? 'None'
   });
-  row.createEl('td', { text: String(component.sourceFiles.length) });
 
   const vulnerabilityCell = row.createEl('td');
   const vulnerabilityStack = vulnerabilityCell.createDiv({ cls: 'vulndash-component-vuln-stack' });
@@ -155,11 +187,10 @@ export const renderComponentRow = (
 
   const detailsCell = detailsRow.createEl('td', {
     attr: {
-      colspan: '6'
+      colspan: '7'
     }
   });
 
-  // --- Update: Host element for the Markdown Renderer ---
   const detailsHost = detailsCell.createDiv({ cls: 'vulndash-component-details-host' });
 
   const detailCallbacks: ComponentDetailPanelCallbacks = {};
@@ -173,7 +204,6 @@ export const renderComponentRow = (
     detailCallbacks.effectiveHighestSeverity = effectiveHighestSeverity;
   }
 
-  // --- Update: Asynchronously render the markdown content into the detailsHost ---
   if (expanded) {
     void callbacks.detailsRenderer.renderDetails(detailsHost, component, detailCallbacks);
   }

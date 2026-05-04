@@ -1,3 +1,4 @@
+import type { ComponentOccurrence } from '../../domain/sbom/ComponentOccurrence';
 import type {
   NormalizedComponent,
   NormalizedCweGroup,
@@ -7,17 +8,7 @@ import type {
 } from '../../domain/sbom/types';
 import type { Vulnerability } from '../../domain/entities/Vulnerability';
 
-export interface TrackedComponentSource {
-  componentId: string;
-  documentName: string;
-  format: NormalizedSbomFormat;
-  name: string;
-  sourcePath: string;
-  cpe?: string;
-  notePath?: string | null;
-  purl?: string;
-  version?: string;
-}
+export type TrackedComponentSource = ComponentOccurrence;
 
 export interface TrackedComponent {
   cweGroups: NormalizedCweGroup[];
@@ -43,6 +34,7 @@ export interface ComponentCatalog {
   componentCount: number;
   components: TrackedComponent[];
   formats: NormalizedSbomFormat[];
+  occurrenceCount: number;
   sourceFiles: string[];
 }
 
@@ -60,6 +52,8 @@ export interface ComponentInventorySnapshot {
   enabledSbomCount: number;
   failedSbomCount: number;
   issues: ComponentInventoryIssue[];
+  occurrences: readonly ComponentOccurrence[];
+  occurrenceCount: number;
   parsedSbomCount: number;
 }
 
@@ -109,7 +103,14 @@ export interface ComponentPurlMatchSummary {
 
 export interface ComponentVulnerabilityRelationship {
   componentKey: string;
+  occurrenceId: string;
   evidence: ComponentVulnerabilityLinkEvidence;
+  projectId?: string;
+  projectName?: string;
+  sbomFileName?: string;
+  sbomId?: string;
+  sbomLabel?: string;
+  sourcePath?: string;
   vulnerabilityId: string;
   vulnerabilityRef: string;
   vulnerabilitySource: string;
@@ -119,6 +120,13 @@ export interface RelatedComponentSummary {
   evidence: ComponentVulnerabilityLinkEvidence;
   key: string;
   name: string;
+  occurrenceId?: string;
+  projectId?: string;
+  projectName?: string;
+  sbomFileName?: string;
+  sbomId?: string;
+  sbomLabel?: string;
+  sourcePath?: string;
   vulnerabilityCount: number;
   cpe?: string;
   highestSeverity?: NormalizedSeverity;
@@ -142,6 +150,7 @@ export interface ComponentRelationshipGraph {
   componentsByVulnerability: Map<string, RelatedComponentSummary[]>;
   relationships: ComponentVulnerabilityRelationship[];
   vulnerabilitiesByComponent: Map<string, RelatedVulnerabilitySummary[]>;
+  vulnerabilitiesByOccurrence: Map<string, RelatedVulnerabilitySummary[]>;
 }
 
 export interface ComponentPurlQueryVulnerabilitySummary {
@@ -172,6 +181,11 @@ export interface CatalogComponentInput {
   document: {
     format: NormalizedSbomFormat;
     name: string;
+    projectId?: string;
+    projectName?: string;
+    sbomFileName?: string;
+    sbomId?: string;
+    sbomLabel?: string;
     sourcePath: string;
   };
 }

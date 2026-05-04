@@ -28,7 +28,8 @@ const createGraph = (): ComponentRelationshipGraph => ({
     ]
   ]]),
   relationships: [],
-  vulnerabilitiesByComponent: new Map()
+  vulnerabilitiesByComponent: new Map(),
+  vulnerabilitiesByOccurrence: new Map()
 });
 
 test('builds deterministic vulnerability note relationship context', () => {
