@@ -50,18 +50,45 @@ const createFinding = (): RollupFinding => ({
   }
 });
 
+const createUnassignedFinding = (): RollupFinding => ({
+  affectedProjects: [],
+  key: 'GHSA-ghgh-ghgh-ghgh',
+  triageRecord: null,
+  triageState: 'active',
+  unmappedSboms: [{ sbomId: 'sbom-legacy', sbomLabel: 'legacy-runtime.cdx.json' }],
+  vulnerability: {
+    affectedProducts: ['legacy-runtime'],
+    cvssScore: 7.1,
+    id: 'GHSA-ghgh-ghgh-ghgh',
+    publishedAt: '2026-04-18T09:00:00.000Z',
+    references: [],
+    severity: 'HIGH',
+    source: 'GitHub',
+    summary: 'Legacy runtime issue.',
+    title: 'Legacy runtime vulnerability',
+    updatedAt: '2026-04-18T13:00:00.000Z'
+  }
+});
+
 test('RollupMarkdownRenderer produces wiki-linked project sections and selection rationale', () => {
   const renderer = new RollupMarkdownRenderer();
   const rendered = renderer.render({
     date: '2026-04-18',
-    findings: [createFinding()],
+    findings: [createFinding(), createUnassignedFinding()],
     scope: allProjectsScope
   });
   const markdown = rendered.managedSections.map((section) => section.content).join('\n\n');
 
   assert.equal(rendered.title, '# VulnDash Briefing 2026-04-18');
   assert.equal(rendered.fileName, 'VulnDash Briefing 2026-04-18.md');
+  assert.match(markdown, /## Executive Summary/);
+  assert.match(markdown, /\| Project \| SBOMs \| Critical \| High \| Medium \| Low \| Total \|/);
+  assert.match(markdown, /## Project: Portal Platform/);
+  assert.match(markdown, /## Project: Unassigned Project/);
+  assert.match(markdown, /`Portal API`/);
+  assert.match(markdown, /`legacy-runtime\.cdx\.json`/);
   assert.match(markdown, /\[\[Projects\/Portal\|Portal Platform\]\]/);
+  assert.match(markdown, /### Top Vulnerable Components/);
   assert.match(markdown, /#### Selection Rationale/);
   assert.match(markdown, /Gateway SBOM/);
   assert.match(markdown, /ticket: SEC-123/);
