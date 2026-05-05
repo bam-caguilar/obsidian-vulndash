@@ -1,3 +1,5 @@
+import type { NormalizedSeverity as ResolvedSeverity } from '../vulnerabilities/NormalizedSeverity';
+
 export type NormalizedSbomFormat = 'cyclonedx' | 'spdx';
 
 export type NormalizedSeverity =
@@ -27,6 +29,7 @@ export interface NormalizedVulnerability {
   bomRef?: string;
   description?: string;
   method?: string;
+  normalizedSeverity?: ResolvedSeverity;
   published?: string;
   score?: number;
   severity?: NormalizedSeverity;

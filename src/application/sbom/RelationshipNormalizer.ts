@@ -1,5 +1,7 @@
 import type { Vulnerability } from '../../domain/entities/Vulnerability';
 import type { ComponentOccurrence } from '../../domain/sbom/ComponentOccurrence';
+import { getSeverityRatingRank } from '../../domain/vulnerabilities/SeverityRating';
+import type { NormalizedSeverity } from '../../domain/vulnerabilities/NormalizedSeverity';
 import type {
   ComponentRelationshipGraph,
   ComponentVulnerabilityLinkEvidence,
@@ -29,20 +31,23 @@ const compareOptionalStrings = (
 ): number =>
   (left ?? '').localeCompare(right ?? '');
 
-const severityRank = (severity: string): number => {
-  switch (severity) {
-    case 'CRITICAL':
-      return 4;
-    case 'HIGH':
-      return 3;
-    case 'MEDIUM':
-      return 2;
-    case 'LOW':
-      return 1;
-    default:
-      return 0;
-  }
-};
+const severityRank = (severity: string, normalizedSeverity?: NormalizedSeverity): number =>
+  normalizedSeverity
+    ? getSeverityRatingRank(normalizedSeverity.rating)
+    : (() => {
+      switch (severity) {
+        case 'CRITICAL':
+          return 4;
+        case 'HIGH':
+          return 3;
+        case 'MEDIUM':
+          return 2;
+        case 'LOW':
+          return 1;
+        default:
+          return 0;
+      }
+    })();
 
 export interface VulnerabilityIdentity {
   id: string;
@@ -50,6 +55,14 @@ export interface VulnerabilityIdentity {
   notePath?: string;
   ref: string;
   source: string;
+}
+
+interface RelatedVulnerabilityIdentity extends VulnerabilityIdentity {
+  cvssScore: number;
+  normalizedSeverity?: NormalizedSeverity;
+  references: readonly string[];
+  severity: string;
+  title: string;
 }
 
 export class RelationshipNormalizer {
@@ -65,7 +78,7 @@ export class RelationshipNormalizer {
     relationships: readonly ComponentVulnerabilityRelationship[],
     componentsByKey: ReadonlyMap<string, TrackedComponent>,
     occurrencesById: ReadonlyMap<string, ComponentOccurrence>,
-    vulnerabilitiesByRef: ReadonlyMap<string, VulnerabilityIdentity & Pick<Vulnerability, 'cvssScore' | 'references' | 'severity' | 'title'>>
+    vulnerabilitiesByRef: ReadonlyMap<string, RelatedVulnerabilityIdentity>
   ): ComponentRelationshipGraph {
     const dedupedByPair = new Map<string, ComponentVulnerabilityRelationship>();
 
@@ -127,7 +140,7 @@ export class RelationshipNormalizer {
     for (const [key, entries] of vulnerabilitiesByComponent) {
       vulnerabilitiesByComponent.set(key, entries.sort((left, right) =>
         evidenceRank[left.evidence] - evidenceRank[right.evidence]
-        || severityRank(right.severity) - severityRank(left.severity)
+        || severityRank(right.severity, right.normalizedSeverity) - severityRank(left.severity, left.normalizedSeverity)
         || compareStrings(left.source, right.source)
         || compareStrings(left.id, right.id)
       ));
@@ -136,7 +149,7 @@ export class RelationshipNormalizer {
     for (const [key, entries] of vulnerabilitiesByOccurrence) {
       vulnerabilitiesByOccurrence.set(key, entries.sort((left, right) =>
         evidenceRank[left.evidence] - evidenceRank[right.evidence]
-        || severityRank(right.severity) - severityRank(left.severity)
+        || severityRank(right.severity, right.normalizedSeverity) - severityRank(left.severity, left.normalizedSeverity)
         || compareStrings(left.source, right.source)
         || compareStrings(left.id, right.id)
       ));
@@ -189,6 +202,7 @@ export class RelationshipNormalizer {
       componentKey: relationship.componentKey.trim().toLowerCase(),
       occurrenceId: relationship.occurrenceId.trim().toLowerCase(),
       evidence: relationship.evidence,
+      ...(relationship.normalizedSeverity ? { normalizedSeverity: relationship.normalizedSeverity } : {}),
       ...(relationship.projectId ? { projectId: relationship.projectId.trim() } : {}),
       ...(relationship.projectName ? { projectName: relationship.projectName.trim() } : {}),
       ...(relationship.sbomFileName ? { sbomFileName: relationship.sbomFileName.trim() } : {}),
@@ -240,13 +254,15 @@ export class RelationshipNormalizer {
   }
 
   private toRelatedVulnerabilitySummary(
-    vulnerability: VulnerabilityIdentity & Pick<Vulnerability, 'cvssScore' | 'references' | 'severity' | 'title'>,
+    vulnerability: RelatedVulnerabilityIdentity,
     evidence: ComponentVulnerabilityLinkEvidence
   ): RelatedVulnerabilitySummary {
+    const effectiveScore = vulnerability.normalizedSeverity?.score ?? vulnerability.cvssScore;
     const summary: RelatedVulnerabilitySummary = {
-      cvssScore: vulnerability.cvssScore,
+      cvssScore: effectiveScore,
       evidence,
       id: vulnerability.id,
+      ...(vulnerability.normalizedSeverity ? { normalizedSeverity: vulnerability.normalizedSeverity } : {}),
       referenceCount: vulnerability.references.length,
       severity: vulnerability.severity,
       source: vulnerability.source,

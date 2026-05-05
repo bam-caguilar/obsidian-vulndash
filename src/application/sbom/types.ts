@@ -1,4 +1,5 @@
 import type { ComponentOccurrence } from '../../domain/sbom/ComponentOccurrence';
+import type { NormalizedSeverity as ResolvedSeverity } from '../../domain/vulnerabilities/NormalizedSeverity';
 import type {
   NormalizedComponent,
   NormalizedCweGroup,
@@ -105,6 +106,7 @@ export interface ComponentVulnerabilityRelationship {
   componentKey: string;
   occurrenceId: string;
   evidence: ComponentVulnerabilityLinkEvidence;
+  normalizedSeverity?: ResolvedSeverity;
   projectId?: string;
   projectName?: string;
   sbomFileName?: string;
@@ -139,6 +141,7 @@ export interface RelatedVulnerabilitySummary {
   cvssScore: number;
   evidence: ComponentVulnerabilityLinkEvidence;
   id: string;
+  normalizedSeverity?: ResolvedSeverity;
   referenceCount: number;
   severity: string;
   source: string;

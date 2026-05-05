@@ -6,26 +6,54 @@ import type {
   VulnerabilitySourceUrls
 } from '../../../domain/entities/Vulnerability';
 import type { Severity } from '../../../domain/value-objects/Severity';
-import { classifySeverity } from '../../../domain/value-objects/CvssScore';
-import { parseCvssScore } from '../../../domain/services/CvssVectorParser';
 import { PurlNormalizer } from '../../../domain/services/PurlNormalizer';
+import type { CvssCalculator } from '../../../domain/vulnerabilities/CvssCalculator';
+import type {
+  NormalizedSeverity,
+  NormalizedSeveritySource
+} from '../../../domain/vulnerabilities/NormalizedSeverity';
+import {
+  createVulnerabilitySeverityResolver,
+  type VulnerabilitySeverityCandidate,
+  type VulnerabilitySeverityResolver
+} from '../../../domain/vulnerabilities/VulnerabilitySeverityResolver';
+import type { SeverityRating } from '../../../domain/vulnerabilities/SeverityRating';
+import { createCvssVectorCalculator } from '../../security/CvssVectorCalculator';
 import { sanitizeMarkdown, sanitizeText, sanitizeUrl } from '../../security/sanitize';
 import type { OsvAffectedPayload, OsvSeverityPayload, OsvVulnerabilityPayload } from './OsvTypes';
 
 const OSV_HTML_URL_PREFIX = 'https://osv.dev/vulnerability/';
 const OSV_API_URL_PREFIX = 'https://api.osv.dev/v1/vulns/';
 
-const severityToRepresentativeScore = (severity: Severity): number => {
-  switch (severity) {
-    case 'CRITICAL':
+const severityRatingToLegacySeverity = (rating: SeverityRating): Severity => {
+  switch (rating) {
+    case 'critical':
+      return 'CRITICAL';
+    case 'high':
+      return 'HIGH';
+    case 'medium':
+      return 'MEDIUM';
+    case 'low':
+      return 'LOW';
+    case 'none':
+    case 'unknown':
+    default:
+      return 'NONE';
+  }
+};
+
+const severityRatingToRepresentativeScore = (rating: SeverityRating): number => {
+  switch (rating) {
+    case 'critical':
       return 9.5;
-    case 'HIGH':
+    case 'high':
       return 8;
-    case 'MEDIUM':
+    case 'medium':
       return 5.5;
-    case 'LOW':
+    case 'low':
       return 2.5;
-    case 'NONE':
+    case 'none':
+    case 'unknown':
     default:
       return 0;
   }
@@ -78,82 +106,52 @@ const cloneSeverityPayloads = (
   return normalized.length > 0 ? normalized : undefined;
 };
 
-const normalizeSeverityLabel = (value: string | undefined): Severity | undefined => {
+const normalizeSeverityLabel = (value: string | undefined): SeverityRating | undefined => {
   const normalized = sanitizeText(value ?? '').toLowerCase();
   switch (normalized) {
     case 'critical':
-      return 'CRITICAL';
+      return 'critical';
     case 'high':
-      return 'HIGH';
+      return 'high';
     case 'medium':
     case 'moderate':
-      return 'MEDIUM';
+      return 'medium';
     case 'low':
-      return 'LOW';
+      return 'low';
     case 'none':
     case 'informational':
     case 'info':
+      return 'none';
     case 'unknown':
     case 'unscored':
-      return 'NONE';
+      return 'unknown';
     default:
       return undefined;
   }
 };
 
-const extractNumericCvssScore = (severity: OsvSeverityPayload): number | undefined => {
-  if (!severity.type.toUpperCase().startsWith('CVSS')) {
-    return undefined;
+const getSeverityTypePriority = (type: string | undefined): number => {
+  const normalized = sanitizeText(type ?? '').toUpperCase();
+  if (normalized.includes('CVSS_V4')) {
+    return 0;
+  }
+  if (normalized.includes('CVSS_V3')) {
+    return 1;
+  }
+  if (normalized.includes('CVSS_V2')) {
+    return 2;
   }
 
-  return parseCvssScore(severity.score, severity.type);
+  return 3;
 };
 
-const collectSeverityPayloads = (payload: OsvVulnerabilityPayload): OsvSeverityPayload[] => [
-  ...(payload.severity ?? []),
-  ...(payload.affected ?? []).flatMap((affected) => affected.severity ?? [])
-];
-
-const resolveSeverity = (payload: OsvVulnerabilityPayload): { cvssScore: number; severity: Severity } => {
-  for (const severityPayload of collectSeverityPayloads(payload)) {
-    const cvssScore = extractNumericCvssScore(severityPayload);
-    if (cvssScore !== undefined) {
-      return {
-        cvssScore,
-        severity: classifySeverity(cvssScore)
-      };
-    }
-  }
-
-  const databaseSpecificSeverity = normalizeSeverityLabel(
-    payload.database_specific?.severity
-    ?? payload.affected?.find((affected) => affected.database_specific?.severity)?.database_specific?.severity
-  );
-  if (databaseSpecificSeverity) {
-    return {
-      cvssScore: severityToRepresentativeScore(databaseSpecificSeverity),
-      severity: databaseSpecificSeverity
-    };
-  }
-
-  const fallbackSeverity = normalizeSeverityLabel(
-    collectSeverityPayloads(payload)
-      .map((severityPayload) => severityPayload.score)
-      .find((value) => normalizeSeverityLabel(value) !== undefined)
-    ?? payload.affected?.find((affected) => normalizeSeverityLabel(affected.ecosystem_specific?.severity) !== undefined)?.ecosystem_specific?.severity
-  );
-  if (fallbackSeverity) {
-    return {
-      cvssScore: severityToRepresentativeScore(fallbackSeverity),
-      severity: fallbackSeverity
-    };
-  }
-
-  return {
-    cvssScore: 0,
-    severity: 'NONE'
-  };
-};
+const sortSeverityPayloadsForPriority = (
+  severityPayloads: readonly OsvSeverityPayload[] | undefined
+): readonly OsvSeverityPayload[] =>
+  [...(severityPayloads ?? [])].sort((left, right) =>
+    getSeverityTypePriority(left.type) - getSeverityTypePriority(right.type)
+    || sanitizeText(left.type).localeCompare(sanitizeText(right.type))
+    || sanitizeText(left.score).localeCompare(sanitizeText(right.score)));
 
 const extractPurlVersion = (purl: string): string | undefined => {
   const hashIndex = purl.indexOf('#');
@@ -299,7 +297,11 @@ const buildStableId = (payload: OsvVulnerabilityPayload): string => {
 };
 
 export class OsvMapper {
-  public constructor(private readonly sourceName: string) {}
+  public constructor(
+    private readonly sourceName: string,
+    private readonly cvssCalculator: CvssCalculator = createCvssVectorCalculator(),
+    private readonly severityResolver: VulnerabilitySeverityResolver = createVulnerabilitySeverityResolver()
+  ) {}
 
   public normalize(payload: OsvVulnerabilityPayload, queriedPurl?: string): Vulnerability {
     const id = buildStableId(payload);
@@ -307,7 +309,9 @@ export class OsvMapper {
     const updatedAt = sanitizeText(payload.modified ?? publishedAt);
     const title = sanitizeText(payload.summary ?? id ?? 'OSV Advisory');
     const summary = sanitizeMarkdown(payload.details ?? payload.summary ?? 'No summary provided');
-    const { cvssScore, severity } = resolveSeverity(payload);
+    const normalizedSeverity = this.resolveNormalizedSeverity(payload, queriedPurl);
+    const severity = severityRatingToLegacySeverity(normalizedSeverity.rating);
+    const cvssScore = normalizedSeverity.score ?? severityRatingToRepresentativeScore(normalizedSeverity.rating);
 
     const affectedPackages = (payload.affected ?? [])
       .map((affected) => toAffectedPackage(affected))
@@ -404,10 +408,120 @@ export class OsvMapper {
       publishedAt,
       updatedAt,
       cvssScore,
+      normalizedSeverity,
       severity,
       references,
       affectedProducts,
       ...(Object.keys(metadata).length > 0 ? { metadata } : {})
     };
+  }
+
+  private resolveNormalizedSeverity(
+    payload: OsvVulnerabilityPayload,
+    queriedPurl?: string
+  ): NormalizedSeverity {
+    const candidates: VulnerabilitySeverityCandidate[] = [];
+    const matchedAffectedEntries = this.findSeverityRelevantAffectedEntries(payload, queriedPurl);
+
+    for (const affected of matchedAffectedEntries) {
+      candidates.push(...this.buildSeverityCandidates(affected.severity, 'osv-affected'));
+    }
+
+    candidates.push(...this.buildSeverityCandidates(payload.severity, 'osv-top-level'));
+
+    const databaseSpecificSeverity = uniqueNonEmpty([
+      ...matchedAffectedEntries.map((affected) => sanitizeText(
+        affected.database_specific?.severity
+        ?? affected.ecosystem_specific?.severity
+        ?? ''
+      )),
+      sanitizeText(payload.database_specific?.severity ?? '')
+    ]);
+
+    for (const severity of databaseSpecificSeverity) {
+      candidates.push({
+        rating: severity,
+        source: 'database-specific'
+      });
+    }
+
+    return this.severityResolver.resolve({
+      candidates,
+      fallbackSource: 'unknown'
+    });
+  }
+
+  private buildSeverityCandidates(
+    severityPayloads: readonly OsvSeverityPayload[] | undefined,
+    source: NormalizedSeveritySource
+  ): VulnerabilitySeverityCandidate[] {
+    const candidates: VulnerabilitySeverityCandidate[] = [];
+
+    for (const severityPayload of sortSeverityPayloadsForPriority(severityPayloads)) {
+      const score = sanitizeText(severityPayload.score);
+      if (!score) {
+        continue;
+      }
+
+      const calculation = this.cvssCalculator.calculate({
+        score,
+        type: severityPayload.type
+      });
+
+      if (calculation.isSupported && calculation.score !== undefined) {
+        candidates.push({
+          ...(calculation.method ? { method: calculation.method } : {}),
+          score: calculation.score,
+          source,
+          ...(calculation.vector ? { vector: calculation.vector } : {})
+        });
+        continue;
+      }
+
+      const rating = normalizeSeverityLabel(score);
+      candidates.push({
+        ...(calculation.method ? { method: calculation.method } : {}),
+        ...(rating ? { rating } : {}),
+        source,
+        ...(calculation.vector ? { vector: calculation.vector } : {})
+      });
+    }
+
+    return candidates;
+  }
+
+  private findSeverityRelevantAffectedEntries(
+    payload: OsvVulnerabilityPayload,
+    queriedPurl?: string
+  ): readonly OsvAffectedPayload[] {
+    const affectedEntries = [...(payload.affected ?? [])];
+    if (affectedEntries.length === 0) {
+      return [];
+    }
+
+    const normalizedQueriedPurl = PurlNormalizer.normalize(queriedPurl);
+    if (!normalizedQueriedPurl) {
+      return affectedEntries;
+    }
+
+    const exactMatches = affectedEntries.filter((affected) =>
+      PurlNormalizer.normalize(affected.package?.purl) === normalizedQueriedPurl);
+    if (exactMatches.length > 0) {
+      return exactMatches;
+    }
+
+    const queriedPackage = parseNormalizedPurl(normalizedQueriedPurl);
+    if (!queriedPackage) {
+      return affectedEntries;
+    }
+
+    const fallbackMatches = affectedEntries.filter((affected) => {
+      const affectedName = sanitizeText(affected.package?.name ?? '').toLowerCase();
+      const affectedEcosystem = sanitizeText(affected.package?.ecosystem ?? '').toLowerCase();
+      return affectedName === queriedPackage.name.toLowerCase()
+        && affectedEcosystem === queriedPackage.ecosystem.toLowerCase();
+    });
+
+    return fallbackMatches.length > 0 ? fallbackMatches : affectedEntries;
   }
 }
