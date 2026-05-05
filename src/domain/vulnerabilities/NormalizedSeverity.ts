@@ -3,6 +3,7 @@ import {
   type SeverityRating
 } from './SeverityRating';
 import { mapSeverityScoreToRating } from './SeverityScoreMapper';
+import { CvssScore } from '../value-objects/CvssScore';
 
 export type NormalizedSeverityMethod =
   | 'CVSS_V4'
@@ -36,17 +37,6 @@ export interface CreateNormalizedSeverityInput {
   readonly method?: NormalizedSeverityMethod;
 }
 
-const roundToNearestTenth = (value: number): number =>
-  Math.round(value * 10) / 10;
-
-const normalizeScore = (value: number | undefined): number | undefined => {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 10) {
-    return undefined;
-  }
-
-  return roundToNearestTenth(value);
-};
-
 const normalizeText = (value: string | undefined): string | undefined => {
   const normalized = value?.trim();
   return normalized ? normalized : undefined;
@@ -55,7 +45,7 @@ const normalizeText = (value: string | undefined): string | undefined => {
 export const createNormalizedSeverity = (
   input: CreateNormalizedSeverityInput
 ): NormalizedSeverity => {
-  const normalizedScore = normalizeScore(input.score);
+  const normalizedScore = CvssScore.getValue(CvssScore.fromNullable(input.score));
   const normalizedVector = normalizeText(input.vector);
   const normalizedMethod = normalizeText(input.method) as NormalizedSeverityMethod | undefined;
   const normalizedSource = input.source ?? 'unknown';
