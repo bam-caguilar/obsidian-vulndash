@@ -52,6 +52,7 @@ test('ResolveAffectedProjects deduplicates shared project notes and surfaces unm
   const resolver = new ResolveAffectedProjects(repository, lookup);
   const vulnerability = createVulnerability();
   const graph: ComponentRelationshipGraph = {
+    allSeveritiesByComponent: new Map(),
     componentsByVulnerability: new Map([[
       'nvd::cve-2026-1000',
       [{
@@ -90,6 +91,7 @@ test('ResolveAffectedProjects preserves broken note mappings for repair flows', 
   const resolver = new ResolveAffectedProjects(repository, lookup);
   const vulnerability = createVulnerability({ id: 'CVE-2026-2000' });
   const graph: ComponentRelationshipGraph = {
+    allSeveritiesByComponent: new Map(),
     componentsByVulnerability: new Map([[
       'nvd::cve-2026-2000',
       [{

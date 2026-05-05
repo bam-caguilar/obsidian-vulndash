@@ -2,6 +2,7 @@ import type { Vulnerability } from '../../domain/entities/Vulnerability';
 import type { ComponentOccurrence } from '../../domain/sbom/ComponentOccurrence';
 import { getSeverityRatingRank } from '../../domain/vulnerabilities/SeverityRating';
 import type { NormalizedSeverity } from '../../domain/vulnerabilities/NormalizedSeverity';
+import type { SeverityRating } from '../../domain/vulnerabilities/SeverityRating';
 import type {
   ComponentRelationshipGraph,
   ComponentVulnerabilityLinkEvidence,
@@ -30,32 +31,6 @@ const compareOptionalStrings = (
   right: string | null | undefined
 ): number =>
   (left ?? '').localeCompare(right ?? '');
-
-const severityRank = (severity: string, normalizedSeverity?: NormalizedSeverity): number =>
-  normalizedSeverity
-    ? getSeverityRatingRank(normalizedSeverity.rating)
-    : (() => {
-      switch (severity) {
-        case 'CRITICAL':
-          return 4;
-        case 'HIGH':
-          return 3;
-        case 'MEDIUM':
-          return 2;
-        case 'LOW':
-          return 1;
-        default:
-          return 0;
-      }
-    })();
-
-const severityScore = (cvssScore: number, normalizedSeverity?: NormalizedSeverity): number => {
-  if (typeof normalizedSeverity?.score === 'number' && Number.isFinite(normalizedSeverity.score)) {
-    return normalizedSeverity.score;
-  }
-
-  return Number.isFinite(cvssScore) ? cvssScore : 0;
-};
 
 export interface VulnerabilityIdentity {
   id: string;
@@ -147,9 +122,10 @@ export class RelationshipNormalizer {
 
     for (const [key, entries] of vulnerabilitiesByComponent) {
       vulnerabilitiesByComponent.set(key, entries.sort((left, right) =>
-        evidenceRank[left.evidence] - evidenceRank[right.evidence]
-        || severityScore(right.cvssScore, right.normalizedSeverity) - severityScore(left.cvssScore, left.normalizedSeverity)
-        || severityRank(right.severity, right.normalizedSeverity) - severityRank(left.severity, left.normalizedSeverity)
+        getSeverityRatingRank(right.normalizedSeverity?.rating) - getSeverityRatingRank(left.normalizedSeverity?.rating)
+        || right.severityRank - left.severityRank
+        || (right.normalizedSeverity?.score ?? -1) - (left.normalizedSeverity?.score ?? -1)
+        || evidenceRank[left.evidence] - evidenceRank[right.evidence]
         || compareStrings(left.source, right.source)
         || compareStrings(left.id, right.id)
       ));
@@ -157,15 +133,15 @@ export class RelationshipNormalizer {
 
     for (const [key, entries] of vulnerabilitiesByOccurrence) {
       vulnerabilitiesByOccurrence.set(key, entries.sort((left, right) =>
-        evidenceRank[left.evidence] - evidenceRank[right.evidence]
-        || severityScore(right.cvssScore, right.normalizedSeverity) - severityScore(left.cvssScore, left.normalizedSeverity)
-        || severityRank(right.severity, right.normalizedSeverity) - severityRank(left.severity, left.normalizedSeverity)
-        || compareStrings(left.source, right.source)
-        || compareStrings(left.id, right.id)
+        getSeverityRatingRank(right.normalizedSeverity?.rating) - getSeverityRatingRank(left.normalizedSeverity?.rating)
+        || right.severityRank - left.severityRank
+        || (right.normalizedSeverity?.score ?? -1) - (left.normalizedSeverity?.score ?? -1)
+        || evidenceRank[left.evidence] - evidenceRank[right.evidence]
       ));
     }
 
     return {
+      allSeveritiesByComponent: this.buildAllSeveritiesByComponent(vulnerabilitiesByComponent),
       componentsByVulnerability,
       relationships: normalizedRelationships,
       vulnerabilitiesByComponent,
@@ -267,14 +243,19 @@ export class RelationshipNormalizer {
     vulnerability: RelatedVulnerabilityIdentity,
     evidence: ComponentVulnerabilityLinkEvidence
   ): RelatedVulnerabilitySummary {
-    const effectiveScore = vulnerability.normalizedSeverity?.score ?? vulnerability.cvssScore;
+    const effectiveScore = vulnerability.normalizedSeverity?.score
+      ?? (Number.isFinite(vulnerability.cvssScore) && vulnerability.cvssScore > 0
+        ? vulnerability.cvssScore
+        : undefined);
+    const computedSeverityRank = getSeverityRatingRank(vulnerability.normalizedSeverity?.rating);
     const summary: RelatedVulnerabilitySummary = {
-      cvssScore: effectiveScore,
+      cvssScore: effectiveScore ?? 0,
       evidence,
       id: vulnerability.id,
       ...(vulnerability.normalizedSeverity ? { normalizedSeverity: vulnerability.normalizedSeverity } : {}),
       referenceCount: vulnerability.references.length,
       severity: vulnerability.severity,
+      severityRank: computedSeverityRank,
       source: vulnerability.source,
       title: vulnerability.title
     };
@@ -284,5 +265,21 @@ export class RelationshipNormalizer {
     }
 
     return summary;
+  }
+
+  private buildAllSeveritiesByComponent(
+    vulnerabilitiesByComponent: ReadonlyMap<string, readonly RelatedVulnerabilitySummary[]>
+  ): Map<string, SeverityRating[]> {
+    const result = new Map<string, SeverityRating[]>();
+    for (const [componentKey, summaries] of vulnerabilitiesByComponent) {
+      const seen = new Set<SeverityRating>();
+      for (const summary of summaries) {
+        if (summary.normalizedSeverity?.rating) {
+          seen.add(summary.normalizedSeverity.rating);
+        }
+      }
+      result.set(componentKey, Array.from(seen));
+    }
+    return result;
   }
 }

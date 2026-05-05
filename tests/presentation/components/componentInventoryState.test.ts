@@ -74,6 +74,7 @@ const createRelatedVulnerability = (
   id: 'GHSA-aaaa-bbbb-cccc',
   referenceCount: 2,
   severity: 'HIGH',
+  severityRank: 5,
   source: 'GitHub',
   title: 'Widget issue',
   ...overrides
@@ -112,6 +113,7 @@ const createSnapshot = (
       parsedSbomCount: 2
     },
     relationships: {
+      allSeveritiesByComponent: new Map(),
       componentsByVulnerability: new Map(),
       relationships: [],
       vulnerabilitiesByComponent: relationshipsByComponent ?? new Map(),

@@ -1,6 +1,7 @@
 import type { RollupFinding } from '../../domain/rollup/RollupFinding';
 import { UNASSIGNED_PROJECT_NAME } from '../../domain/project/ProjectName';
 import { formatTriageStateLabel } from '../../domain/triage/TriageState';
+import { getSeverityRank, resolveSeverity } from '../../domain/value-objects/Severity';
 import type { ResolvedBriefingScope } from '../briefing/BriefingScopeService';
 import {
   DailyRollupMarkdownComposer,
@@ -229,8 +230,7 @@ export class RollupMarkdownRenderer {
   }
 
   private incrementSeverityCount(section: ProjectSectionAccumulator, finding: RollupFinding): void {
-    const severity = safeInline(finding.vulnerability.severity, 'UNKNOWN').toUpperCase();
-    switch (severity) {
+    switch (resolveSeverity(finding.vulnerability.severity)) {
       case 'CRITICAL':
         section.criticalCount += 1;
         break;
@@ -373,11 +373,11 @@ export class RollupMarkdownRenderer {
     }
 
     const criticalCount = findings.filter((finding) =>
-      safeInline(finding.vulnerability.severity, 'UNKNOWN').toUpperCase() === 'CRITICAL'
+      resolveSeverity(finding.vulnerability.severity) === 'CRITICAL'
     ).length;
 
     const highCount = findings.filter((finding) =>
-      safeInline(finding.vulnerability.severity, 'UNKNOWN').toUpperCase() === 'HIGH'
+      resolveSeverity(finding.vulnerability.severity) === 'HIGH'
     ).length;
 
     const summaryParts: string[] = [
@@ -449,33 +449,20 @@ export class RollupMarkdownRenderer {
   }
 
   private sortFindings(findings: readonly RollupFinding[]): RollupFinding[] {
-    const severityWeight: Record<string, number> = {
-      CRITICAL: 5,
-      HIGH: 4,
-      MEDIUM: 3,
-      LOW: 2,
-      INFORMATIONAL: 1,
-      UNKNOWN: 0
-    };
-
     return [...findings].sort((left, right) => {
-      const leftSeverity = safeInline(left.vulnerability.severity, 'UNKNOWN').toUpperCase();
-      const rightSeverity = safeInline(right.vulnerability.severity, 'UNKNOWN').toUpperCase();
-
-      const severityDiff = (severityWeight[rightSeverity] ?? 0) - (severityWeight[leftSeverity] ?? 0);
+      const severityDiff = getSeverityRank(right.vulnerability.severity)
+        - getSeverityRank(left.vulnerability.severity);
       if (severityDiff !== 0) {
         return severityDiff;
       }
 
-      const rightCvss = Number.isFinite(right.vulnerability.cvssScore)
-        ? right.vulnerability.cvssScore
-        : -1;
-      const leftCvss = Number.isFinite(left.vulnerability.cvssScore)
-        ? left.vulnerability.cvssScore
-        : -1;
+      const rightScore = right.vulnerability.normalizedSeverity?.score
+        ?? (Number.isFinite(right.vulnerability.cvssScore) ? right.vulnerability.cvssScore : -1);
+      const leftScore = left.vulnerability.normalizedSeverity?.score
+        ?? (Number.isFinite(left.vulnerability.cvssScore) ? left.vulnerability.cvssScore : -1);
 
-      if (rightCvss !== leftCvss) {
-        return rightCvss - leftCvss;
+      if (rightScore !== leftScore) {
+        return rightScore - leftScore;
       }
 
       return left.vulnerability.id.localeCompare(right.vulnerability.id);

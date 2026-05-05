@@ -86,6 +86,7 @@ const createSnapshot = (
     },
     purlMatches: [],
     relationships: {
+      allSeveritiesByComponent: new Map(),
       componentsByVulnerability: new Map(),
       relationships: [],
       vulnerabilitiesByComponent: related,
