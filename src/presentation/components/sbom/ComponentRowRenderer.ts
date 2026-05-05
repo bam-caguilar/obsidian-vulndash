@@ -38,16 +38,16 @@ export class ComponentRowRenderer implements RowRenderer<ComponentInventoryDispl
 
     // Project Column
     const projectNames = uniqueValues(entry.visibleSources.map((source) => source.projectName));
-    const projectCol = mainRow.createDiv({ cls: 'vulndash-col' });
+    const projectCol = mainRow.createDiv({ cls: 'vulndash-component-col-project' });
     this.renderValueStack(projectCol, projectNames[0] ?? 'Unassigned Project', projectNames.length > 1 ? `${projectNames.length} projects in scope` : undefined);
 
     // SBOM Column
     const sbomNames = uniqueValues(entry.visibleSources.map((source) => source.sbomFileName));
-    const sbomCol = mainRow.createDiv({ cls: 'vulndash-col' });
+    const sbomCol = mainRow.createDiv({ cls: 'vulndash-component-col-sbom' });
     this.renderValueStack(sbomCol, sbomNames[0] ?? 'Unknown SBOM', sbomNames.length > 1 ? `${sbomNames.length} SBOM files in scope` : undefined);
 
     // Name Column
-    const nameCol = mainRow.createDiv({ cls: 'vulndash-col' });
+    const nameCol = mainRow.createDiv({ cls: 'vulndash-component-col-name' });
     const nameStack = nameCol.createDiv({ cls: 'vulndash-component-name-stack' });
     nameStack.createEl('strong', { text: component.name });
     nameStack.createDiv({ cls: 'vulndash-muted-copy', text: component.supplier ?? 'Unknown supplier' });
@@ -55,11 +55,11 @@ export class ComponentRowRenderer implements RowRenderer<ComponentInventoryDispl
     this.renderBadges(stateBadges, component);
 
     // Version & Identifier
-    mainRow.createDiv({ cls: 'vulndash-col', text: component.version ?? 'No version' });
-    mainRow.createDiv({ cls: 'vulndash-col vulndash-component-table-mono', text: component.purl ?? component.cpe ?? 'None' });
+    mainRow.createDiv({ cls: 'vulndash-component-col-version', text: component.version ?? 'No version' });
+    mainRow.createDiv({ cls: 'vulndash-component-col-identifier vulndash-component-table-mono', text: component.purl ?? component.cpe ?? 'None' });
 
     // Vulnerability Column
-    const vulnCol = mainRow.createDiv({ cls: 'vulndash-col' });
+    const vulnCol = mainRow.createDiv({ cls: 'vulndash-component-col-vulnerabilities' });
     const vulnStack = vulnCol.createDiv({ cls: 'vulndash-component-vuln-stack' });
     vulnStack.createSpan({ text: String(entry.vulnerabilityCount) });
     vulnStack.createSpan({
@@ -68,7 +68,7 @@ export class ComponentRowRenderer implements RowRenderer<ComponentInventoryDispl
     });
 
     // Actions Column
-    const actionsCol = mainRow.createDiv({ cls: 'vulndash-col' });
+    const actionsCol = mainRow.createDiv({ cls: 'vulndash-component-col-actions' });
     this.renderActions(actionsCol, component, expanded);
 
     row.appendChild(mainRow);

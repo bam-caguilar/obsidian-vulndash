@@ -13,7 +13,7 @@ export class VirtualizedComponentTable {
 
     // Inject Sticky Header directly into the shared scrolling container
     this.headerEl = document.createElement('div');
-    this.headerEl.className = 'vulndash-virtual-header vulndash-table-row';
+    this.headerEl.className = 'vulndash-virtual-header vulndash-component-header vulndash-table-row';
     this.headerEl.style.position = 'sticky';
     this.headerEl.style.top = '0';
     this.headerEl.style.zIndex = '10';
@@ -22,7 +22,7 @@ export class VirtualizedComponentTable {
     // Updated to use PURL
     for (const label of ['Project', 'SBOM File', 'Component', 'Version', 'PURL', 'Vulnerabilities', 'Actions']) {
         const col = document.createElement('div');
-        col.className = 'vulndash-col-header';
+        col.className = 'vulndash-col-header vulndash-component-header';
         col.textContent = label;
         this.headerEl.appendChild(col);
     }

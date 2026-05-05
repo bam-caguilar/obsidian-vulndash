@@ -1372,26 +1372,26 @@
 
 /* COMPONENT INVENTORY TABLE WIDTHS */
 /* COMPONENT INVENTORY TABLE WIDTHS (Exactly 100%) */
-.vulndash-component-table-shell .vulndash-col-header:nth-child(1),
-.vulndash-component-table-shell .vulndash-col:nth-child(1) { flex: 0 0 14%; } /* Project */
+.vulndash-component-table-shell .vulndash-component-header:nth-child(1),
+.vulndash-component-table-shell .vulndash-component-col-project { flex: 0 0 8%; } /* Project */
 
-.vulndash-component-table-shell .vulndash-col-header:nth-child(2),
-.vulndash-component-table-shell .vulndash-col:nth-child(2) { flex: 0 0 14%; } /* SBOM File */
+.vulndash-component-table-shell .vulndash-component-header:nth-child(2),
+.vulndash-component-table-shell .vulndash-component-col-sbom { flex: 0 0 14%; } /* SBOM File */
 
-.vulndash-component-table-shell .vulndash-col-header:nth-child(3),
-.vulndash-component-table-shell .vulndash-col:nth-child(3) { flex: 0 0 22%; } /* Component */
+.vulndash-component-table-shell .vulndash-component-header:nth-child(3),
+.vulndash-component-table-shell .vulndash-component-col-name { flex: 0 0 20%; } /* Component */
 
-.vulndash-component-table-shell .vulndash-col-header:nth-child(4),
-.vulndash-component-table-shell .vulndash-col:nth-child(4) { flex: 0 0 10%; } /* Version */
+.vulndash-component-table-shell .vulndash-component-header:nth-child(4),
+.vulndash-component-table-shell .vulndash-component-col-version { flex: 0 0 12%; } /* Version */
 
-.vulndash-component-table-shell .vulndash-col-header:nth-child(5),
-.vulndash-component-table-shell .vulndash-col:nth-child(5) { flex: 0 0 16%; } /* PURL */
+.vulndash-component-table-shell .vulndash-component-header:nth-child(5),
+.vulndash-component-table-shell .vulndash-component-col-identifier { flex: 0 0 25%; } /* PURL */
 
-.vulndash-component-table-shell .vulndash-col-header:nth-child(6),
-.vulndash-component-table-shell .vulndash-col:nth-child(6) { flex: 0 0 8%; }  /* Vulnerabilities */
+.vulndash-component-table-shell .vulndash-component-header:nth-child(6),
+.vulndash-component-table-shell .vulndash-component-col-vulnerabilities { flex: 0 0 5%; }  /* Vulnerabilities */
 
-.vulndash-component-table-shell .vulndash-col-header:nth-child(7),
-.vulndash-component-table-shell .vulndash-col:nth-child(7) { flex: 0 0 16%; } /* Actions */
+.vulndash-component-table-shell .vulndash-component-header:nth-child(7),
+.vulndash-component-table-shell .vulndash-component-col-actions { flex: 0 0 16%; } /* Actions */
 
 
 /* VULNERABILITY TABLE WIDTHS */
