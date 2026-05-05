@@ -1,22 +1,21 @@
-export type SeverityRating =
-  | 'critical'
-  | 'high'
-  | 'medium'
-  | 'low'
-  | 'none'
-  | 'unknown';
+import {
+  getSeverityRank,
+  severityTokenOrder,
+  toSeverityToken,
+  type SeverityToken
+} from '../value-objects/Severity';
+
+export type SeverityRating = SeverityToken;
 
 export const severityRatingOrder: Record<SeverityRating, number> = {
-  unknown: 0,
-  none: 1,
-  low: 2,
-  medium: 3,
-  high: 4,
-  critical: 5
+  unknown: severityTokenOrder.unknown,
+  none: severityTokenOrder.none,
+  informational: severityTokenOrder.informational,
+  low: severityTokenOrder.low,
+  medium: severityTokenOrder.medium,
+  high: severityTokenOrder.high,
+  critical: severityTokenOrder.critical
 };
-
-const normalizeSeverityToken = (value: string): string =>
-  value.trim().replace(/[\s_-]+/g, ' ').toLowerCase();
 
 export const isSeverityRating = (value: string): value is SeverityRating =>
   value === 'critical'
@@ -24,32 +23,13 @@ export const isSeverityRating = (value: string): value is SeverityRating =>
   || value === 'medium'
   || value === 'low'
   || value === 'none'
+  || value === 'informational'
   || value === 'unknown';
 
 export const resolveSeverityRating = (
   value: string | null | undefined
-): SeverityRating => {
-  const normalized = normalizeSeverityToken(value ?? '');
-  switch (normalized) {
-    case 'critical':
-      return 'critical';
-    case 'high':
-      return 'high';
-    case 'medium':
-    case 'moderate':
-      return 'medium';
-    case 'low':
-      return 'low';
-    case 'none':
-    case 'negligible':
-      return 'none';
-    case 'unknown':
-      return 'unknown';
-    default:
-      return 'unknown';
-  }
-};
+): SeverityRating => toSeverityToken(value);
 
 export const getSeverityRatingRank = (
   severity: SeverityRating | undefined
-): number => severity ? severityRatingOrder[severity] : 0;
+): number => getSeverityRank(severity);

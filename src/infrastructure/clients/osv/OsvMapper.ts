@@ -5,7 +5,7 @@ import type {
   VulnerabilityMetadata,
   VulnerabilitySourceUrls
 } from '../../../domain/entities/Vulnerability';
-import type { Severity } from '../../../domain/value-objects/Severity';
+import { resolveSeverityRating } from '../../../domain/vulnerabilities/SeverityRating';
 import { PurlNormalizer } from '../../../domain/services/PurlNormalizer';
 import type { CvssCalculator } from '../../../domain/vulnerabilities/CvssCalculator';
 import type {
@@ -13,51 +13,20 @@ import type {
   NormalizedSeveritySource
 } from '../../../domain/vulnerabilities/NormalizedSeverity';
 import {
+  createVulnerabilitySeverityPolicy,
+  type VulnerabilitySeverityPolicy
+} from '../../../domain/vulnerabilities/VulnerabilitySeverityPolicy';
+import {
   createVulnerabilitySeverityResolver,
   type VulnerabilitySeverityCandidate,
   type VulnerabilitySeverityResolver
 } from '../../../domain/vulnerabilities/VulnerabilitySeverityResolver';
-import type { SeverityRating } from '../../../domain/vulnerabilities/SeverityRating';
 import { createCvssVectorCalculator } from '../../security/CvssVectorCalculator';
 import { sanitizeMarkdown, sanitizeText, sanitizeUrl } from '../../security/sanitize';
 import type { OsvAffectedPayload, OsvSeverityPayload, OsvVulnerabilityPayload } from './OsvTypes';
 
 const OSV_HTML_URL_PREFIX = 'https://osv.dev/vulnerability/';
 const OSV_API_URL_PREFIX = 'https://api.osv.dev/v1/vulns/';
-
-const severityRatingToLegacySeverity = (rating: SeverityRating): Severity => {
-  switch (rating) {
-    case 'critical':
-      return 'CRITICAL';
-    case 'high':
-      return 'HIGH';
-    case 'medium':
-      return 'MEDIUM';
-    case 'low':
-      return 'LOW';
-    case 'none':
-    case 'unknown':
-    default:
-      return 'NONE';
-  }
-};
-
-const severityRatingToRepresentativeScore = (rating: SeverityRating): number => {
-  switch (rating) {
-    case 'critical':
-      return 9.5;
-    case 'high':
-      return 8;
-    case 'medium':
-      return 5.5;
-    case 'low':
-      return 2.5;
-    case 'none':
-    case 'unknown':
-    default:
-      return 0;
-  }
-};
 
 const uniqueNonEmpty = (values: readonly string[]): string[] => {
   const seen = new Set<string>();
@@ -104,30 +73,6 @@ const cloneSeverityPayloads = (
     .filter((severityPayload): severityPayload is VulnerabilitySeverityHint => severityPayload !== null);
 
   return normalized.length > 0 ? normalized : undefined;
-};
-
-const normalizeSeverityLabel = (value: string | undefined): SeverityRating | undefined => {
-  const normalized = sanitizeText(value ?? '').toLowerCase();
-  switch (normalized) {
-    case 'critical':
-      return 'critical';
-    case 'high':
-      return 'high';
-    case 'medium':
-    case 'moderate':
-      return 'medium';
-    case 'low':
-      return 'low';
-    case 'none':
-    case 'informational':
-    case 'info':
-      return 'none';
-    case 'unknown':
-    case 'unscored':
-      return 'unknown';
-    default:
-      return undefined;
-  }
 };
 
 const getSeverityTypePriority = (type: string | undefined): number => {
@@ -300,7 +245,8 @@ export class OsvMapper {
   public constructor(
     private readonly sourceName: string,
     private readonly cvssCalculator: CvssCalculator = createCvssVectorCalculator(),
-    private readonly severityResolver: VulnerabilitySeverityResolver = createVulnerabilitySeverityResolver()
+    private readonly severityResolver: VulnerabilitySeverityResolver = createVulnerabilitySeverityResolver(),
+    private readonly severityPolicy: VulnerabilitySeverityPolicy = createVulnerabilitySeverityPolicy()
   ) {}
 
   public normalize(payload: OsvVulnerabilityPayload, queriedPurl?: string): Vulnerability {
@@ -310,8 +256,11 @@ export class OsvMapper {
     const title = sanitizeText(payload.summary ?? id ?? 'OSV Advisory');
     const summary = sanitizeMarkdown(payload.details ?? payload.summary ?? 'No summary provided');
     const normalizedSeverity = this.resolveNormalizedSeverity(payload, queriedPurl);
-    const severity = severityRatingToLegacySeverity(normalizedSeverity.rating);
-    const cvssScore = normalizedSeverity.score ?? severityRatingToRepresentativeScore(normalizedSeverity.rating);
+    const resolvedSeverity = this.severityPolicy.resolve({
+      normalizedSeverity
+    });
+    const severity = resolvedSeverity.severity;
+    const cvssScore = resolvedSeverity.score ?? 0;
 
     const affectedPackages = (payload.affected ?? [])
       .map((affected) => toAffectedPackage(affected))
@@ -408,7 +357,7 @@ export class OsvMapper {
       publishedAt,
       updatedAt,
       cvssScore,
-      normalizedSeverity,
+      normalizedSeverity: resolvedSeverity.normalizedSeverity,
       severity,
       references,
       affectedProducts,
@@ -478,10 +427,10 @@ export class OsvMapper {
         continue;
       }
 
-      const rating = normalizeSeverityLabel(score);
+      const rating = resolveSeverityRating(score);
       candidates.push({
         ...(calculation.method ? { method: calculation.method } : {}),
-        ...(rating ? { rating } : {}),
+        ...(rating !== 'unknown' ? { rating } : {}),
         source,
         ...(calculation.vector ? { vector: calculation.vector } : {})
       });

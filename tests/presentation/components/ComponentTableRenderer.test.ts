@@ -60,6 +60,7 @@ const createRelatedVulnerability = (
   id: 'CVE-2026-0001',
   referenceCount: 1,
   severity: 'HIGH',
+  severityRank: 5,
   source: 'OSV',
   title: 'Widget issue',
   ...overrides

@@ -184,9 +184,7 @@ export class ComponentDetailsRenderer extends Component {
           severityMethod: this.toSafeText(vulnerability.normalizedSeverity?.method, ''),
           severitySource: this.toSafeText(formatNormalizedSeveritySource(vulnerability.normalizedSeverity), ''),
           severityVector: this.toSafeText(vulnerability.normalizedSeverity?.vector, ''),
-          score: this.toFiniteNumberOrUndefined(
-            getNormalizedSeverityScore(vulnerability.normalizedSeverity, vulnerability.cvssScore)
-          ),
+          score: this.toFiniteNumberOrUndefined(vulnerability.normalizedSeverity?.score),
           source: this.toSafeText(vulnerability.source, ''),
           summary: this.toSafeText(vulnerability.title, ''),
           refs: `${this.toNonNegativeInteger(vulnerability.referenceCount)} reference${vulnerability.referenceCount === 1 ? '' : 's'}`,

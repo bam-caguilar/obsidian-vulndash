@@ -6,6 +6,7 @@ import type { ComponentRelationshipGraph } from '../../../src/application/sbom/t
 const service = new ComponentBacklinkService();
 
 const createGraph = (): ComponentRelationshipGraph => ({
+  allSeveritiesByComponent: new Map(),
   componentsByVulnerability: new Map([[
     'github::ghsa-aaaa-bbbb-cccc',
     [

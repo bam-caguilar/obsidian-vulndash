@@ -74,6 +74,7 @@ const createRelatedVulnerability = (
   id: 'GHSA-aaaa-bbbb-cccc',
   referenceCount: 2,
   severity: 'HIGH',
+  severityRank: 5,
   source: 'GitHub',
   title: 'Widget issue',
   ...overrides
@@ -112,6 +113,7 @@ const createSnapshot = (
       parsedSbomCount: 2
     },
     relationships: {
+      allSeveritiesByComponent: new Map(),
       componentsByVulnerability: new Map(),
       relationships: [],
       vulnerabilitiesByComponent: relationshipsByComponent ?? new Map(),
@@ -425,4 +427,63 @@ test('deriveComponentInventoryState projects unknown vulnerability severity and 
   assert.equal(derived.components.length, 1);
   assert.equal(derived.components[0]?.highestSeverity, 'unknown');
   assert.equal(derived.components[0]?.relatedVulnerabilities[0]?.severity, 'Unknown');
+});
+
+test('filterTrackedComponents matches a component via a secondary lower-severity finding (multi-severity filtering defect)', () => {
+  // Component has CRITICAL as highestSeverity but also has a HIGH finding.
+  // Filtering by 'high' must still match it even though highestSeverity is 'critical'.
+  const componentKey = 'purl:pkg:npm/multi-vuln@2.0.0';
+  const sourceId = 'component-occurrence::sbom-a::component-1';
+  const snapshot = createSnapshot(
+    [createComponent({
+      key: componentKey,
+      name: 'multi-vuln',
+      purl: 'pkg:npm/multi-vuln@2.0.0',
+      version: '2.0.0'
+    })],
+    undefined,
+    [],
+    new Map([
+      [sourceId, [
+        createRelatedVulnerability({
+          id: 'CVE-2026-CRITICAL',
+          severity: 'CRITICAL',
+          severityRank: 6,
+          normalizedSeverity: { rating: 'critical', source: 'unknown' }
+        }),
+        createRelatedVulnerability({
+          id: 'CVE-2026-HIGH',
+          severity: 'HIGH',
+          severityRank: 5,
+          normalizedSeverity: { rating: 'high', source: 'unknown' }
+        })
+      ]]
+    ])
+  );
+
+  // Manually inject allSeveritiesByComponent because createSnapshot uses an empty Map.
+  (snapshot.relationships.allSeveritiesByComponent as Map<string, string[]>).set(
+    componentKey,
+    ['critical', 'high']
+  );
+
+  const defaultFilters = createDefaultComponentInventoryFilters();
+
+  const filteredByCritical = filterTrackedComponents(
+    deriveComponentInventoryState(snapshot, defaultFilters).components,
+    { ...defaultFilters, severityThreshold: 'critical' }
+  );
+  assert.equal(filteredByCritical.length, 1, 'critical filter should match component with critical finding');
+
+  const filteredByHigh = filterTrackedComponents(
+    deriveComponentInventoryState(snapshot, defaultFilters).components,
+    { ...defaultFilters, severityThreshold: 'high' }
+  );
+  assert.equal(filteredByHigh.length, 1, 'high filter should also match component that has a high finding alongside a critical one');
+
+  const filteredByMedium = filterTrackedComponents(
+    deriveComponentInventoryState(snapshot, defaultFilters).components,
+    { ...defaultFilters, severityThreshold: 'medium' }
+  );
+  assert.equal(filteredByMedium.length, 0, 'medium filter should not match a component with only critical and high findings');
 });
