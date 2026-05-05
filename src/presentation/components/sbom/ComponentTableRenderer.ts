@@ -389,6 +389,7 @@ export class ComponentTableRenderer {
         ? this.callbacks.onUnfollowComponent(rowModel.key)
         : this.callbacks.onFollowComponent(rowModel.key));
     });
+    followButton.addClass('vulndash-action-button');
     actions.appendChild(followButton);
 
     const enableButton = createButton(
@@ -401,6 +402,7 @@ export class ComponentTableRenderer {
         ? this.callbacks.onDisableComponent(rowModel.key)
         : this.callbacks.onEnableComponent(rowModel.key));
     });
+    enableButton.addClass('vulndash-action-button');
     actions.appendChild(enableButton);
 
     const detailButton = createButton(rowModel.isExpanded ? 'Hide Details' : 'View Details');
@@ -408,6 +410,7 @@ export class ComponentTableRenderer {
       event.stopPropagation();
       this.callbacks.onToggleExpanded(rowModel.key, !rowModel.isExpanded);
     });
+    detailButton.addClass('vulndash-action-button');
     actions.appendChild(detailButton);
 
     cell.appendChild(actions);

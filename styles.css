@@ -1040,7 +1040,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .vulndash-component-chip-list {
@@ -1064,6 +1064,7 @@
   border: 1px solid transparent;
   font-size: var(--font-ui-smaller);
   font-weight: 600;
+  max-width: calc(fit-content + 4px);
 }
 
 .vulndash-severity-pill.is-critical {
@@ -1286,34 +1287,34 @@
 }
 
 .vulndash-triage-state-active {
-  background: rgba(180, 73, 65, 0.14);
-  border-color: rgba(180, 73, 65, 0.35);
-  color: #8b2f2b;
+  background: #4a1f1c;
+  border-color: #dc827b;
+  color: #ffd8d5;
 }
 
 .vulndash-triage-state-investigating {
-  background: rgba(198, 124, 23, 0.16);
-  border-color: rgba(198, 124, 23, 0.38);
-  color: #8a4b06;
+  background: #4a300e;
+  border-color: #e2a94d;
+  color: #ffe1ad;
 }
 
 .vulndash-triage-state-accepted_risk {
-  background: rgba(90, 93, 183, 0.15);
-  border-color: rgba(90, 93, 183, 0.32);
-  color: #34389d;
+  background: #292b63;
+  border-color: #9ea2ff;
+  color: #e2e4ff;
 }
 
 .vulndash-triage-state-mitigated {
-  background: rgba(47, 128, 90, 0.15);
-  border-color: rgba(47, 128, 90, 0.34);
-  color: #256246;
+  background: #173d2b;
+  border-color: #7fcba4;
+  color: #d8f5e6;
 }
 
 .vulndash-triage-state-false_positive,
 .vulndash-triage-state-suppressed {
-  background: rgba(89, 97, 112, 0.15);
-  border-color: rgba(89, 97, 112, 0.3);
-  color: #4d5563;
+  background: #29303a;
+  border-color: #9aa3b2;
+  color: #eef2f7;
 }
 
 /* ==========================================================================
@@ -1418,17 +1419,17 @@
 
 /* COMPONENT INVENTORY TABLE WIDTHS */
 /* COMPONENT INVENTORY TABLE WIDTHS (Exactly 100%) */
-.vulndash-component-table .vulndash-component-col-project { width: 8%; } /* Project */
+.vulndash-component-table .vulndash-component-col-project { width: 10%; } /* Project */
 
-.vulndash-component-table .vulndash-component-col-sbom { width: 14%; } /* SBOM File */
+.vulndash-component-table .vulndash-component-col-sbom { width: 16%; } /* SBOM File */
 
-.vulndash-component-table .vulndash-component-col-name { width: 20%; } /* Component */
+.vulndash-component-table .vulndash-component-col-name { width: 18%; } /* Component */
 
-.vulndash-component-table .vulndash-component-col-version { width: 12%; } /* Version */
+.vulndash-component-table .vulndash-component-col-version { width: 8%; } /* Version */
 
-.vulndash-component-table .vulndash-component-col-identifier { width: 25%; } /* PURL */
+.vulndash-component-table .vulndash-component-col-identifier { width: 20%; } /* PURL */
 
-.vulndash-component-table .vulndash-component-col-vulnerabilities { width: 5%; }  /* Vulnerabilities */
+.vulndash-component-table .vulndash-component-col-vulnerabilities { width: 12%; }  /* Vulnerabilities */
 
 .vulndash-component-table .vulndash-component-col-actions { width: 16%; } /* Actions */
 
@@ -1451,3 +1452,23 @@
 
 .vulndash-virtual-table-root .vulndash-col-header:nth-child(6),
 .vulndash-virtual-table-root .vulndash-col-publishedAt { flex: 0 0 15%; }
+
+/*
+  Note: these action buttons are used in various contexts across the app, so we
+  use a shared class for consistent styling
+*/
+.vulndash-action-button {
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  font-size: var(--font-ui-smaller);
+}
+
+/*
+Hide the syncing of components message
+*/
+.vulndash-component-state-region {
+  display: none;
+}
+.vulndash-component-issues-region {
+  display: none;
+}
