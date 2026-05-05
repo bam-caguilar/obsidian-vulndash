@@ -907,6 +907,46 @@
   justify-content: flex-end;
 }
 
+.vulndash-component-table-shell {
+  overflow: hidden;
+}
+
+.vulndash-component-table-viewport {
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.vulndash-component-table {
+  width: 100%;
+  min-width: 1100px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+}
+
+.vulndash-component-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--background-secondary);
+}
+
+.vulndash-component-table td {
+  border-top: 1px solid var(--background-modifier-border);
+  padding: 0.85rem 0.9rem;
+  vertical-align: top;
+}
+
+.vulndash-component-table-row:hover > td {
+  background: color-mix(in srgb, var(--background-modifier-hover) 78%, var(--background-primary));
+}
+
+.vulndash-component-details-row > td {
+  padding: 0;
+  background: var(--background-secondary);
+}
+
 .vulndash-component-row.is-followed {
   background: color-mix(in srgb, var(--color-green, #22c55e) 6%, transparent);
 }
@@ -917,10 +957,6 @@
 
 .vulndash-component-row.is-vulnerable {
   box-shadow: inset 3px 0 0 color-mix(in srgb, var(--text-warning) 75%, transparent);
-}
-
-.vulndash-component-row:hover .vulndash-col {
-  background: color-mix(in srgb, var(--background-modifier-hover) 78%, var(--background-primary));
 }
 
 .vulndash-component-name-stack,
@@ -1372,26 +1408,19 @@
 
 /* COMPONENT INVENTORY TABLE WIDTHS */
 /* COMPONENT INVENTORY TABLE WIDTHS (Exactly 100%) */
-.vulndash-component-table-shell .vulndash-component-header:nth-child(1),
-.vulndash-component-table-shell .vulndash-component-col-project { flex: 0 0 8%; } /* Project */
+.vulndash-component-table .vulndash-component-col-project { width: 8%; } /* Project */
 
-.vulndash-component-table-shell .vulndash-component-header:nth-child(2),
-.vulndash-component-table-shell .vulndash-component-col-sbom { flex: 0 0 14%; } /* SBOM File */
+.vulndash-component-table .vulndash-component-col-sbom { width: 14%; } /* SBOM File */
 
-.vulndash-component-table-shell .vulndash-component-header:nth-child(3),
-.vulndash-component-table-shell .vulndash-component-col-name { flex: 0 0 20%; } /* Component */
+.vulndash-component-table .vulndash-component-col-name { width: 20%; } /* Component */
 
-.vulndash-component-table-shell .vulndash-component-header:nth-child(4),
-.vulndash-component-table-shell .vulndash-component-col-version { flex: 0 0 12%; } /* Version */
+.vulndash-component-table .vulndash-component-col-version { width: 12%; } /* Version */
 
-.vulndash-component-table-shell .vulndash-component-header:nth-child(5),
-.vulndash-component-table-shell .vulndash-component-col-identifier { flex: 0 0 25%; } /* PURL */
+.vulndash-component-table .vulndash-component-col-identifier { width: 25%; } /* PURL */
 
-.vulndash-component-table-shell .vulndash-component-header:nth-child(6),
-.vulndash-component-table-shell .vulndash-component-col-vulnerabilities { flex: 0 0 5%; }  /* Vulnerabilities */
+.vulndash-component-table .vulndash-component-col-vulnerabilities { width: 5%; }  /* Vulnerabilities */
 
-.vulndash-component-table-shell .vulndash-component-header:nth-child(7),
-.vulndash-component-table-shell .vulndash-component-col-actions { flex: 0 0 16%; } /* Actions */
+.vulndash-component-table .vulndash-component-col-actions { width: 16%; } /* Actions */
 
 
 /* VULNERABILITY TABLE WIDTHS */

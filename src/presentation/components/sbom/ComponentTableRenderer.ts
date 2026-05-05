@@ -9,6 +9,7 @@ import type {
   ComponentDetailPanelCallbacks,
   ComponentDetailsRenderer
 } from './ComponentDetailPanel';
+import { buildRowPatchPlan } from './buildRowPatchPlan';
 
 export interface ComponentTableRowModel {
   readonly component: TrackedComponent;
@@ -76,10 +77,15 @@ const createButton = (label: string, className?: string): HTMLButtonElement => {
 };
 
 export class ComponentTableRenderer {
-  private bodyEl: HTMLDivElement | null = null;
-  private headerEl: HTMLDivElement | null = null;
+  private bodyEl: HTMLTableSectionElement | null = null;
+  private currentKeys: string[] = [];
+  private readonly detailsRowElements = new Map<string, HTMLTableRowElement>();
+  private headerEl: HTMLTableSectionElement | null = null;
   private hostEl: HTMLElement | null = null;
+  private readonly rowElements = new Map<string, HTMLTableRowElement>();
+  private readonly rowHashes = new Map<string, string>();
   private shellEl: HTMLDivElement | null = null;
+  private tableEl: HTMLTableElement | null = null;
   private viewportEl: HTMLDivElement | null = null;
 
   public constructor(
@@ -96,16 +102,77 @@ export class ComponentTableRenderer {
     if (!this.bodyEl) {
       return;
     }
+    const nextRows = this.normalizeRows(rows);
+    const nextKeys = nextRows.map((rowModel) => rowModel.key);
+    const nextRowsByKey = new Map(nextRows.map((rowModel) => [rowModel.key, rowModel] as const));
+    const dirtyKeys = new Set<string>();
 
-    this.bodyEl.replaceChildren(...rows.map((rowModel) => this.createRow(rowModel)));
+    for (const rowModel of nextRows) {
+      if (this.rowHashes.get(rowModel.key) !== rowModel.rowStateHash) {
+        dirtyKeys.add(rowModel.key);
+      }
+    }
+
+    const patchPlan = buildRowPatchPlan(this.currentKeys, nextKeys, dirtyKeys);
+    for (const key of patchPlan.deletedKeys) {
+      this.removeRow(key);
+    }
+
+    for (const key of patchPlan.createdKeys) {
+      const rowModel = nextRowsByKey.get(key);
+      if (!rowModel) {
+        continue;
+      }
+
+      const rowElement = this.createMainRow(rowModel);
+      this.rowElements.set(key, rowElement);
+      this.rowHashes.set(key, rowModel.rowStateHash);
+      this.patchDetailsRow(key, rowModel);
+    }
+
+    for (const key of patchPlan.dirtyKeys) {
+      const rowModel = nextRowsByKey.get(key);
+      const rowElement = this.rowElements.get(key);
+      if (!rowModel || !rowElement) {
+        continue;
+      }
+
+      this.patchMainRow(rowElement, rowModel);
+      this.patchDetailsRow(key, rowModel);
+      this.rowHashes.set(key, rowModel.rowStateHash);
+    }
+
+    for (const key of patchPlan.nextKeys) {
+      const rowElement = this.rowElements.get(key);
+      if (!rowElement) {
+        continue;
+      }
+
+      this.bodyEl.appendChild(rowElement);
+      const detailsRow = this.detailsRowElements.get(key);
+      if (detailsRow) {
+        this.bodyEl.appendChild(detailsRow);
+      }
+    }
+
+    this.currentKeys = [...patchPlan.nextKeys];
+    this.rowHashes.clear();
+    for (const rowModel of nextRows) {
+      this.rowHashes.set(rowModel.key, rowModel.rowStateHash);
+    }
   }
 
   public destroy(): void {
+    this.currentKeys = [];
     this.bodyEl = null;
+    this.detailsRowElements.clear();
     this.headerEl = null;
     this.viewportEl = null;
+    this.rowElements.clear();
+    this.rowHashes.clear();
     this.shellEl?.remove();
     this.shellEl = null;
+    this.tableEl = null;
     this.hostEl = null;
   }
 
@@ -116,12 +183,15 @@ export class ComponentTableRenderer {
 
     if (!this.shellEl) {
       this.shellEl = createDiv('vulndash-component-table-shell vulndash-card-shell vulndash-virtual-table-root');
-      this.viewportEl = createDiv('vulndash-component-table-viewport vulndash-virtual-viewport');
-      this.headerEl = createDiv('vulndash-virtual-header vulndash-table-row');
-      this.bodyEl = createDiv('vulndash-component-table-body');
+      this.viewportEl = createDiv('vulndash-component-table-viewport');
+      this.tableEl = document.createElement('table');
+      this.tableEl.className = 'vulndash-table vulndash-component-table';
+      this.headerEl = document.createElement('thead');
+      this.bodyEl = document.createElement('tbody');
 
       this.renderHeader();
-      this.viewportEl.append(this.headerEl, this.bodyEl);
+      this.tableEl.append(this.headerEl, this.bodyEl);
+      this.viewportEl.appendChild(this.tableEl);
       this.shellEl.appendChild(this.viewportEl);
     }
 
@@ -135,59 +205,63 @@ export class ComponentTableRenderer {
       return;
     }
 
-    this.headerEl.replaceChildren(...HEADER_LABELS.map((label) => {
-      const header = createDiv('vulndash-col-header vulndash-component-header', label);
+    const row = document.createElement('tr');
+    row.className = 'vulndash-component-header-row';
+    row.replaceChildren(...HEADER_LABELS.map((label, index) => {
+      const header = document.createElement('th');
+      header.className = this.getColumnClassName(index);
+      header.classList.add('vulndash-component-header');
+      header.textContent = label;
       return header;
     }));
+
+    this.headerEl.replaceChildren(row);
   }
 
-  private createRow(rowModel: ComponentTableRowModel): HTMLDivElement {
-    const row = createDiv('vulndash-component-table-row-shell');
+  private createMainRow(rowModel: ComponentTableRowModel): HTMLTableRowElement {
+    const row = document.createElement('tr');
+    row.className = 'vulndash-component-table-row vulndash-component-row';
     row.dataset.componentKey = rowModel.key;
     row.dataset.rowStateHash = rowModel.rowStateHash;
+    this.applyRowClasses(row, rowModel);
 
-    row.appendChild(this.createMainRow(rowModel));
-    if (rowModel.isExpanded) {
-      row.appendChild(this.createDetailsRow(rowModel));
-    }
-
-    return row;
-  }
-
-  private createMainRow(rowModel: ComponentTableRowModel): HTMLDivElement {
-    const mainRow = createDiv('vulndash-virtual-row vulndash-component-row');
-    this.applyRowClasses(mainRow, rowModel);
-
-    mainRow.appendChild(this.createValueStackColumn(
+    row.appendChild(this.createValueStackCell(
       'vulndash-component-col-project',
       rowModel.projectLabel,
       rowModel.projectCaption
     ));
-    mainRow.appendChild(this.createValueStackColumn(
+    row.appendChild(this.createValueStackCell(
       'vulndash-component-col-sbom',
       rowModel.sbomLabel,
       rowModel.sbomCaption
     ));
-    mainRow.appendChild(this.createNameColumn(rowModel));
+    row.appendChild(this.createNameCell(rowModel));
 
-    const versionCol = createDiv('vulndash-col vulndash-component-col-version', rowModel.versionLabel);
-    mainRow.appendChild(versionCol);
+    const versionCell = document.createElement('td');
+    versionCell.className = 'vulndash-component-col-version';
+    versionCell.textContent = rowModel.versionLabel;
+    row.appendChild(versionCell);
 
-    const identifierCol = createDiv(
-      'vulndash-col vulndash-component-col-identifier vulndash-component-table-mono',
-      rowModel.identifierLabel
-    );
-    mainRow.appendChild(identifierCol);
+    const identifierCell = document.createElement('td');
+    identifierCell.className = 'vulndash-component-col-identifier vulndash-component-table-mono';
+    identifierCell.textContent = rowModel.identifierLabel;
+    row.appendChild(identifierCell);
 
-    mainRow.appendChild(this.createVulnerabilityColumn(rowModel));
-    mainRow.appendChild(this.createActionsColumn(rowModel));
-    return mainRow;
+    row.appendChild(this.createVulnerabilityCell(rowModel));
+    row.appendChild(this.createActionsCell(rowModel));
+    return row;
   }
 
-  private createDetailsRow(rowModel: ComponentTableRowModel): HTMLDivElement {
-    const detailsRow = createDiv('vulndash-component-details-row is-visible');
+  private createDetailsRow(rowModel: ComponentTableRowModel): HTMLTableRowElement {
+    const detailsRow = document.createElement('tr');
+    detailsRow.className = 'vulndash-component-details-row is-visible';
+    detailsRow.dataset.detailFor = rowModel.key;
+    const detailsCell = document.createElement('td');
+    detailsCell.className = 'vulndash-component-details-cell';
+    detailsCell.colSpan = HEADER_LABELS.length;
     const detailsHost = createDiv('vulndash-component-details-host');
-    detailsRow.appendChild(detailsHost);
+    detailsCell.appendChild(detailsHost);
+    detailsRow.appendChild(detailsCell);
 
     const detailCallbacks: ComponentDetailPanelCallbacks = {};
     if (rowModel.highestSeverity) {
@@ -209,12 +283,13 @@ export class ComponentTableRenderer {
     return detailsRow;
   }
 
-  private createValueStackColumn(
+  private createValueStackCell(
     columnClassName: string,
     primary: string,
     secondary?: string
-  ): HTMLDivElement {
-    const column = createDiv(`vulndash-col ${columnClassName}`);
+  ): HTMLTableCellElement {
+    const cell = document.createElement('td');
+    cell.className = columnClassName;
     const stack = createDiv('vulndash-component-source-stack');
     const primaryEl = document.createElement('strong');
     primaryEl.textContent = primary;
@@ -222,12 +297,13 @@ export class ComponentTableRenderer {
     if (secondary) {
       stack.appendChild(createDiv('vulndash-muted-copy', secondary));
     }
-    column.appendChild(stack);
-    return column;
+    cell.appendChild(stack);
+    return cell;
   }
 
-  private createNameColumn(rowModel: ComponentTableRowModel): HTMLDivElement {
-    const column = createDiv('vulndash-col vulndash-component-col-name');
+  private createNameCell(rowModel: ComponentTableRowModel): HTMLTableCellElement {
+    const cell = document.createElement('td');
+    cell.className = 'vulndash-component-col-name';
     const stack = createDiv('vulndash-component-name-stack');
     const title = document.createElement('strong');
     title.textContent = rowModel.componentName;
@@ -238,24 +314,26 @@ export class ComponentTableRenderer {
     this.renderBadges(badgeList, rowModel.component);
     stack.appendChild(badgeList);
 
-    column.appendChild(stack);
-    return column;
+    cell.appendChild(stack);
+    return cell;
   }
 
-  private createVulnerabilityColumn(rowModel: ComponentTableRowModel): HTMLDivElement {
-    const column = createDiv('vulndash-col vulndash-component-col-vulnerabilities');
+  private createVulnerabilityCell(rowModel: ComponentTableRowModel): HTMLTableCellElement {
+    const cell = document.createElement('td');
+    cell.className = 'vulndash-component-col-vulnerabilities';
     const stack = createDiv('vulndash-component-vuln-stack');
     stack.appendChild(createDiv(undefined, String(rowModel.vulnerabilityCount)));
     stack.appendChild(createDiv(
       `vulndash-severity-pill is-${rowModel.highestSeverity?.toLowerCase() ?? 'none'}`,
       formatSeverity(rowModel.highestSeverity)
     ));
-    column.appendChild(stack);
-    return column;
+    cell.appendChild(stack);
+    return cell;
   }
 
-  private createActionsColumn(rowModel: ComponentTableRowModel): HTMLDivElement {
-    const column = createDiv('vulndash-col vulndash-component-col-actions');
+  private createActionsCell(rowModel: ComponentTableRowModel): HTMLTableCellElement {
+    const cell = document.createElement('td');
+    cell.className = 'vulndash-component-col-actions';
     const actions = createDiv('vulndash-component-row-actions');
 
     const followButton = createButton(
@@ -289,8 +367,8 @@ export class ComponentTableRenderer {
     });
     actions.appendChild(detailButton);
 
-    column.appendChild(actions);
-    return column;
+    cell.appendChild(actions);
+    return cell;
   }
 
   private renderBadges(containerEl: HTMLElement, component: TrackedComponent): void {
@@ -308,11 +386,139 @@ export class ComponentTableRenderer {
     }
   }
 
-  private applyRowClasses(
-    rowEl: HTMLElement,
+  private patchMainRow(
+    rowEl: HTMLTableRowElement,
     rowModel: ComponentTableRowModel
   ): void {
-    rowEl.className = 'vulndash-virtual-row vulndash-component-row';
+    rowEl.dataset.componentKey = rowModel.key;
+    rowEl.dataset.rowStateHash = rowModel.rowStateHash;
+    this.applyRowClasses(rowEl, rowModel);
+
+    const cells = Array.from(rowEl.cells);
+    if (cells.length !== HEADER_LABELS.length) {
+      rowEl.replaceChildren(...Array.from(this.createMainRow(rowModel).children));
+      return;
+    }
+
+    cells[0]?.replaceChildren(this.createValueStackCell(
+      'vulndash-component-col-project',
+      rowModel.projectLabel,
+      rowModel.projectCaption
+    ).firstElementChild as HTMLElement);
+    cells[1]?.replaceChildren(this.createValueStackCell(
+      'vulndash-component-col-sbom',
+      rowModel.sbomLabel,
+      rowModel.sbomCaption
+    ).firstElementChild as HTMLElement);
+    cells[2]?.replaceChildren(this.createNameCell(rowModel).firstElementChild as HTMLElement);
+    const versionCell = cells[3];
+    const identifierCell = cells[4];
+    if (!versionCell || !identifierCell) {
+      rowEl.replaceChildren(...Array.from(this.createMainRow(rowModel).children));
+      return;
+    }
+
+    versionCell.textContent = rowModel.versionLabel;
+    identifierCell.textContent = rowModel.identifierLabel;
+    cells[5]?.replaceChildren(this.createVulnerabilityCell(rowModel).firstElementChild as HTMLElement);
+    cells[6]?.replaceChildren(this.createActionsCell(rowModel).firstElementChild as HTMLElement);
+  }
+
+  private patchDetailsRow(
+    key: string,
+    rowModel: ComponentTableRowModel
+  ): void {
+    const existingDetailsRow = this.detailsRowElements.get(key) ?? null;
+    if (!rowModel.isExpanded) {
+      existingDetailsRow?.remove();
+      this.detailsRowElements.delete(key);
+      return;
+    }
+
+    const detailsRow = existingDetailsRow ?? this.createDetailsRow(rowModel);
+    if (!existingDetailsRow) {
+      this.detailsRowElements.set(key, detailsRow);
+      return;
+    }
+
+    const detailsHost = detailsRow.querySelector('.vulndash-component-details-host');
+    if (!(detailsHost instanceof HTMLElement)) {
+      const replacement = this.createDetailsRow(rowModel);
+      existingDetailsRow.replaceWith(replacement);
+      this.detailsRowElements.set(key, replacement);
+      return;
+    }
+
+    const detailCallbacks: ComponentDetailPanelCallbacks = {};
+    if (rowModel.highestSeverity) {
+      detailCallbacks.effectiveHighestSeverity = rowModel.highestSeverity;
+    }
+    if (rowModel.relatedVulnerabilities.length > 0) {
+      detailCallbacks.relatedVulnerabilities = rowModel.relatedVulnerabilities;
+    }
+    if (this.callbacks.onOpenNote) {
+      detailCallbacks.onOpenNote = this.callbacks.onOpenNote;
+    }
+
+    void this.callbacks.detailsRenderer.renderDetails(
+      detailsHost,
+      rowModel.component,
+      detailCallbacks
+    );
+  }
+
+  private removeRow(key: string): void {
+    this.rowElements.get(key)?.remove();
+    this.rowElements.delete(key);
+    this.detailsRowElements.get(key)?.remove();
+    this.detailsRowElements.delete(key);
+    this.rowHashes.delete(key);
+  }
+
+  private normalizeRows(
+    rows: readonly ComponentTableRowModel[]
+  ): readonly ComponentTableRowModel[] {
+    const seenKeys = new Set<string>();
+    const normalizedRows: ComponentTableRowModel[] = [];
+
+    for (const rowModel of rows) {
+      const key = rowModel.key.trim();
+      if (!key || seenKeys.has(key)) {
+        continue;
+      }
+
+      seenKeys.add(key);
+      normalizedRows.push(rowModel);
+    }
+
+    return normalizedRows;
+  }
+
+  private getColumnClassName(index: number): string {
+    switch (index) {
+      case 0:
+        return 'vulndash-component-col-project';
+      case 1:
+        return 'vulndash-component-col-sbom';
+      case 2:
+        return 'vulndash-component-col-name';
+      case 3:
+        return 'vulndash-component-col-version';
+      case 4:
+        return 'vulndash-component-col-identifier';
+      case 5:
+        return 'vulndash-component-col-vulnerabilities';
+      case 6:
+      default:
+        return 'vulndash-component-col-actions';
+    }
+  }
+
+  private applyRowClasses(
+    rowEl: HTMLTableRowElement,
+    rowModel: ComponentTableRowModel
+  ): void {
+    rowEl.className = 'vulndash-component-table-row vulndash-component-row';
     if (!rowModel.component.isEnabled) {
       rowEl.classList.add('is-disabled');
     }
