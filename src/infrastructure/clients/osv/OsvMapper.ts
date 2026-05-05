@@ -1,6 +1,7 @@
 import type {
   Vulnerability,
   VulnerabilityAffectedPackage,
+  VulnerabilitySeverityHint,
   VulnerabilityMetadata,
   VulnerabilitySourceUrls
 } from '../../../domain/entities/Vulnerability';
@@ -50,6 +51,31 @@ const uniqueNonEmpty = (values: readonly string[]): string[] => {
   }
 
   return result;
+};
+
+const cloneSeverityPayloads = (
+  severityPayloads: readonly OsvSeverityPayload[] | undefined
+): readonly VulnerabilitySeverityHint[] | undefined => {
+  if (!severityPayloads || severityPayloads.length === 0) {
+    return undefined;
+  }
+
+  const normalized = severityPayloads
+    .map((severityPayload) => {
+      const type = sanitizeText(severityPayload.type);
+      const score = sanitizeText(severityPayload.score);
+      if (!type || !score) {
+        return null;
+      }
+
+      return Object.freeze({
+        score,
+        type
+      } satisfies VulnerabilitySeverityHint);
+    })
+    .filter((severityPayload): severityPayload is VulnerabilitySeverityHint => severityPayload !== null);
+
+  return normalized.length > 0 ? normalized : undefined;
 };
 
 const normalizeSeverityLabel = (value: string | undefined): Severity | undefined => {
@@ -224,12 +250,14 @@ const toAffectedPackage = (affected: OsvAffectedPayload): VulnerabilityAffectedP
 
   const version = parsedPurl?.version ?? (normalizedPurl ? extractPurlVersion(normalizedPurl) : undefined);
   const vulnerableVersionRange = buildVersionRange(affected);
+  const severity = cloneSeverityPayloads(affected.severity);
 
   return {
     name: packageName,
     ...(ecosystem ? { ecosystem } : {}),
     ...(normalizedPurl ? { evidence: 'payload-purl' as const } : {}),
     ...(normalizedPurl ? { purl: normalizedPurl } : {}),
+    ...(severity ? { severity } : {}),
     ...(version ? { version } : {}),
     ...(vulnerableVersionRange ? { vulnerableVersionRange } : {})
   };
@@ -356,6 +384,10 @@ export class OsvMapper {
     }
     if (affectedPackages.length > 0) {
       metadata.affectedPackages = affectedPackages;
+    }
+    const topLevelSeverity = cloneSeverityPayloads(payload.severity);
+    if (topLevelSeverity) {
+      metadata.topLevelSeverity = topLevelSeverity;
     }
     if (vulnerableVersionRanges.length > 0) {
       metadata.vulnerableVersionRanges = vulnerableVersionRanges;

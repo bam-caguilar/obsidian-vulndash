@@ -134,3 +134,47 @@ test('OSV mapper preserves the queried PURL as inferred package evidence when th
   assert.equal(vulnerability.metadata?.affectedPackages?.[0]?.version, '1.2.3');
   assert.equal(vulnerability.metadata?.affectedPackages?.[0]?.vulnerableVersionRange, '< 1.2.4');
 });
+
+test('OSV mapper preserves top-level and affected severity payloads for later normalization', () => {
+  const mapper = new OsvMapper('OSV');
+
+  const vulnerability = mapper.normalize({
+    affected: [
+      {
+        package: {
+          ecosystem: 'npm',
+          name: '@example/widget',
+          purl: 'pkg:npm/@example/widget@1.2.3'
+        },
+        severity: [
+          {
+            type: 'CVSS_V4',
+            score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N'
+          }
+        ]
+      }
+    ],
+    id: 'OSV-2026-3000',
+    modified: '2026-04-22T00:00:00.000Z',
+    severity: [
+      {
+        type: 'CVSS_V3',
+        score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'
+      }
+    ],
+    summary: 'Severity preservation issue'
+  });
+
+  assert.deepEqual(vulnerability.metadata?.topLevelSeverity, [
+    {
+      score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+      type: 'CVSS_V3'
+    }
+  ]);
+  assert.deepEqual(vulnerability.metadata?.affectedPackages?.[0]?.severity, [
+    {
+      score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N',
+      type: 'CVSS_V4'
+    }
+  ]);
+});
