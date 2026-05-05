@@ -318,7 +318,10 @@ export class ComponentInventoryView {
           : 'No components available'
       });
       this.renderIssues(inventory.issues.length > 0 ? inventory : null);
-      this.renderTable([]);
+      this.renderTableWithOptions([], {
+        preserveSelection: derivedState.hasActiveFilters,
+        retainShellWhenEmpty: derivedState.hasActiveFilters
+      });
       this.renderPurlDiagnostics([]);
       return;
     }
@@ -445,13 +448,32 @@ export class ComponentInventoryView {
   }
 
   private renderTable(rows: readonly ComponentTableRowModel[]): void {
+    this.renderTableWithOptions(rows, {});
+  }
+
+  private renderTableWithOptions(
+    rows: readonly ComponentTableRowModel[],
+    options: {
+      preserveSelection?: boolean;
+      retainShellWhenEmpty?: boolean;
+    }
+  ): void {
     if (!this.tableHostEl) {
       return;
     }
 
     if (rows.length === 0) {
-      this.selectedComponentKey = null;
       this.visibleRowKeys = [];
+      if (!options.preserveSelection) {
+        this.selectedComponentKey = null;
+      }
+
+      if (options.retainShellWhenEmpty) {
+        this.setRegionVisible(this.tableHostEl, true);
+        this.tableRenderer.render([]);
+        return;
+      }
+
       this.setRegionVisible(this.tableHostEl, false);
       return;
     }
