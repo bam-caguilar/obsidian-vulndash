@@ -959,6 +959,10 @@
   box-shadow: inset 3px 0 0 color-mix(in srgb, var(--text-warning) 75%, transparent);
 }
 
+.vulndash-component-row.is-selected > td {
+  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
+}
+
 .vulndash-component-name-stack,
 .vulndash-component-source-stack,
 .vulndash-component-vuln-stack {

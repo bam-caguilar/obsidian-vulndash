@@ -17,6 +17,7 @@ export interface ComponentTableRowModel {
   readonly highestSeverity: NormalizedSeverity | undefined;
   readonly identifierLabel: string;
   readonly isExpanded: boolean;
+  readonly isSelected: boolean;
   readonly key: string;
   readonly projectCaption?: string;
   readonly projectLabel: string;
@@ -34,6 +35,7 @@ export interface ComponentTableRendererCallbacks {
   readonly onDisableComponent: (componentKey: string) => Promise<void>;
   readonly onEnableComponent: (componentKey: string) => Promise<void>;
   readonly onFollowComponent: (componentKey: string) => Promise<void>;
+  readonly onSelectComponent: (componentKey: string) => void;
   readonly onToggleExpanded: (componentKey: string, expanded: boolean) => void;
   readonly onUnfollowComponent: (componentKey: string) => Promise<void>;
   readonly onOpenNote?: (notePath: string) => void;
@@ -99,9 +101,11 @@ export class ComponentTableRenderer {
 
   public render(rows: readonly ComponentTableRowModel[]): void {
     this.ensureShell();
-    if (!this.bodyEl) {
+    if (!this.bodyEl || !this.viewportEl) {
       return;
     }
+
+    const preservedScrollTop = this.viewportEl.scrollTop;
     const nextRows = this.normalizeRows(rows);
     const nextKeys = nextRows.map((rowModel) => rowModel.key);
     const nextRowsByKey = new Map(nextRows.map((rowModel) => [rowModel.key, rowModel] as const));
@@ -160,6 +164,9 @@ export class ComponentTableRenderer {
     for (const rowModel of nextRows) {
       this.rowHashes.set(rowModel.key, rowModel.rowStateHash);
     }
+
+    const maxScrollTop = Math.max(0, this.viewportEl.scrollHeight - this.viewportEl.clientHeight);
+    this.viewportEl.scrollTop = Math.min(preservedScrollTop, maxScrollTop);
   }
 
   public destroy(): void {
@@ -223,7 +230,9 @@ export class ComponentTableRenderer {
     row.className = 'vulndash-component-table-row vulndash-component-row';
     row.dataset.componentKey = rowModel.key;
     row.dataset.rowStateHash = rowModel.rowStateHash;
+    row.setAttribute('aria-selected', rowModel.isSelected ? 'true' : 'false');
     this.applyRowClasses(row, rowModel);
+    row.addEventListener('click', (event) => this.handleRowClick(event, row));
 
     row.appendChild(this.createValueStackCell(
       'vulndash-component-col-project',
@@ -392,6 +401,7 @@ export class ComponentTableRenderer {
   ): void {
     rowEl.dataset.componentKey = rowModel.key;
     rowEl.dataset.rowStateHash = rowModel.rowStateHash;
+    rowEl.setAttribute('aria-selected', rowModel.isSelected ? 'true' : 'false');
     this.applyRowClasses(rowEl, rowModel);
 
     const cells = Array.from(rowEl.cells);
@@ -528,5 +538,25 @@ export class ComponentTableRenderer {
     if (rowModel.vulnerabilityCount > 0) {
       rowEl.classList.add('is-vulnerable');
     }
+    if (rowModel.isSelected) {
+      rowEl.classList.add('is-selected');
+    }
+  }
+
+  private handleRowClick(
+    event: MouseEvent,
+    rowEl: HTMLTableRowElement
+  ): void {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.closest('button,a,input,select,textarea,label')) {
+      return;
+    }
+
+    const componentKey = rowEl.dataset.componentKey?.trim();
+    if (!componentKey) {
+      return;
+    }
+
+    this.callbacks.onSelectComponent(componentKey);
   }
 }

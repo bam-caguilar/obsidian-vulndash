@@ -55,10 +55,12 @@ export class ComponentInventoryView {
   private renderToken = 0;
   private resultsHostEl: HTMLDivElement | null = null;
   private rootEl: HTMLDivElement | null = null;
+  private selectedComponentKey: string | null = null;
   private stateHostEl: HTMLDivElement | null = null;
   private summaryHostEl: HTMLDivElement | null = null;
   private tableHostEl: HTMLDivElement | null = null;
   private readonly tableRenderer: ComponentTableRenderer;
+  private visibleRowKeys: string[] = [];
 
   public constructor(
     private readonly callbacks: ComponentInventoryViewCallbacks
@@ -68,7 +70,16 @@ export class ComponentInventoryView {
       onDisableComponent: (componentKey) => this.handlePreferenceAction(componentKey, 'disable'),
       onEnableComponent: (componentKey) => this.handlePreferenceAction(componentKey, 'enable'),
       onFollowComponent: (componentKey) => this.handlePreferenceAction(componentKey, 'follow'),
+      onSelectComponent: (componentKey) => {
+        if (this.selectedComponentKey === componentKey) {
+          return;
+        }
+
+        this.selectedComponentKey = componentKey;
+        this.renderResults();
+      },
       onToggleExpanded: (key, expanded) => {
+        this.selectedComponentKey = key;
         if (expanded) {
           this.expandedKeys.add(key);
         } else {
@@ -131,6 +142,8 @@ export class ComponentInventoryView {
   public destroy(): void {
     this.tableRenderer.destroy();
     this.lastReadySnapshot = null;
+    this.selectedComponentKey = null;
+    this.visibleRowKeys = [];
     this.rootEl?.remove();
     this.rootEl = null;
     this.summaryHostEl = null;
@@ -164,6 +177,9 @@ export class ComponentInventoryView {
         if (!availableKeys.has(expandedKey)) {
           this.expandedKeys.delete(expandedKey);
         }
+      }
+      if (this.selectedComponentKey && !availableKeys.has(this.selectedComponentKey)) {
+        this.selectedComponentKey = null;
       }
 
       this.lastReadySnapshot = snapshot;
@@ -434,12 +450,24 @@ export class ComponentInventoryView {
     }
 
     if (rows.length === 0) {
+      this.selectedComponentKey = null;
+      this.visibleRowKeys = [];
       this.setRegionVisible(this.tableHostEl, false);
       return;
     }
 
+    const nextVisibleKeys = rows.map((row) => row.key);
+    this.selectedComponentKey = this.reconcileSelectedComponentKey(nextVisibleKeys);
+    this.visibleRowKeys = [...nextVisibleKeys];
     this.setRegionVisible(this.tableHostEl, true);
-    this.tableRenderer.render(rows);
+    this.tableRenderer.render(rows.map((row) =>
+      row.key === this.selectedComponentKey || (!this.selectedComponentKey && row.isExpanded)
+        ? {
+            ...row,
+            isSelected: true
+          }
+        : row
+    ));
   }
 
   private renderPurlDiagnostics(
@@ -728,6 +756,7 @@ export class ComponentInventoryView {
       highestSeverity: entry.highestSeverity,
       identifierLabel,
       isExpanded: this.expandedKeys.has(entry.component.key),
+      isSelected: this.selectedComponentKey === entry.component.key,
       key: entry.component.key,
       ...(projectCaption ? { projectCaption } : {}),
       projectLabel,
@@ -746,6 +775,7 @@ export class ComponentInventoryView {
         entry.highestSeverity ?? '',
         entry.component.isEnabled ? 'enabled' : 'disabled',
         entry.component.isFollowed ? 'followed' : 'unfollowed',
+        this.selectedComponentKey === entry.component.key ? 'selected' : 'unselected',
         this.expandedKeys.has(entry.component.key) ? 'expanded' : 'collapsed',
         entry.component.formats.join(','),
         entry.relatedVulnerabilities
@@ -759,6 +789,32 @@ export class ComponentInventoryView {
       versionLabel,
       vulnerabilityCount: entry.vulnerabilityCount
     };
+  }
+
+  private reconcileSelectedComponentKey(
+    nextVisibleKeys: readonly string[]
+  ): string | null {
+    if (nextVisibleKeys.length === 0) {
+      return null;
+    }
+
+    if (!this.selectedComponentKey) {
+      return this.expandedKeys.size > 0
+        ? nextVisibleKeys.find((key) => this.expandedKeys.has(key)) ?? null
+        : null;
+    }
+
+    if (nextVisibleKeys.includes(this.selectedComponentKey)) {
+      return this.selectedComponentKey;
+    }
+
+    const previousIndex = this.visibleRowKeys.indexOf(this.selectedComponentKey);
+    if (previousIndex >= 0) {
+      const adjacentIndex = Math.min(previousIndex, nextVisibleKeys.length - 1);
+      return nextVisibleKeys[adjacentIndex] ?? null;
+    }
+
+    return nextVisibleKeys.find((key) => this.expandedKeys.has(key)) ?? nextVisibleKeys[0] ?? null;
   }
 }
 
