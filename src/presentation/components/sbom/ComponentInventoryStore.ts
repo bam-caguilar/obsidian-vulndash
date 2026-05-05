@@ -1,4 +1,5 @@
 import type { NormalizedSbomFormat } from '../../../domain/sbom/types';
+import type { SeverityRating } from '../../../domain/vulnerabilities/SeverityRating';
 import type {
   ComponentPurlMatchSummary,
   ComponentInventoryWorkspaceSnapshot,
@@ -45,6 +46,7 @@ export interface ComponentInventoryDerivedState {
 }
 
 export interface ComponentInventoryDisplayEntry {
+  allSeverities: readonly SeverityRating[];
   component: TrackedComponent;
   highestSeverity: DisplaySeverity | undefined;
   relatedVulnerabilities: readonly RelatedVulnerabilitySummary[];
@@ -180,7 +182,20 @@ const toDisplayEntry = (
   const embeddedVulnerabilities = getScopedEmbeddedVulnerabilities(component, visibleSources);
   const relatedVulnerabilities = getScopedRelatedVulnerabilities(snapshot, component, visibleSources);
 
+  const graphSeverities = snapshot.relationships.allSeveritiesByComponent.get(component.key) ?? [];
+  const embeddedSeverities: SeverityRating[] = embeddedVulnerabilities
+    .map((vulnerability) => {
+      if (vulnerability.normalizedSeverity?.rating) {
+        return vulnerability.normalizedSeverity.rating;
+      }
+      const display = resolveDisplaySeverity(undefined, vulnerability.severity);
+      return display as SeverityRating | undefined;
+    })
+    .filter((r): r is SeverityRating => r !== undefined);
+  const allSeverities = Array.from(new Set([...graphSeverities, ...embeddedSeverities]));
+
   return {
+    allSeverities,
     component,
     highestSeverity: getEffectiveHighestSeverity(
       [
@@ -235,7 +250,8 @@ const matchesSeverityThreshold = (
     return true;
   }
 
-  return matchesDisplaySeverityFilter(entry.highestSeverity, threshold);
+  return entry.allSeverities.includes(threshold as SeverityRating)
+    || matchesDisplaySeverityFilter(entry.highestSeverity, threshold);
 };
 
 export const createDefaultComponentInventoryFilters = (): ComponentInventoryFilters => ({

@@ -52,6 +52,7 @@ const normalizedSeverityToDisplaySeverity = (
     case 'high':
     case 'medium':
     case 'low':
+    case 'informational':
     case 'none':
     case 'unknown':
       return severity.rating;
@@ -75,31 +76,10 @@ export const resolveDisplaySeverity = (
     case 'high':
     case 'medium':
     case 'low':
+    case 'informational':
     case 'none':
     case 'unknown':
       return rating;
-    default:
-      return normalizedLegacySbomSeverity(legacySeverity);
-  }
-};
-
-const normalizedLegacySbomSeverity = (
-  severity: string | undefined
-): DisplaySeverity | undefined => {
-  const normalized = severity?.trim().toLowerCase();
-  switch (normalized) {
-    case 'critical':
-    case 'high':
-    case 'medium':
-    case 'low':
-    case 'informational':
-    case 'info':
-      return normalized === 'info' ? 'informational' : normalized;
-    case 'none':
-      return 'none';
-    case 'unknown':
-    case 'unscored':
-      return 'unknown';
     default:
       return undefined;
   }
