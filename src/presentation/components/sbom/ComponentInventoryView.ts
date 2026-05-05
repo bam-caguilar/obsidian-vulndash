@@ -801,7 +801,18 @@ export class ComponentInventoryView {
         this.expandedKeys.has(entry.component.key) ? 'expanded' : 'collapsed',
         entry.component.formats.join(','),
         entry.relatedVulnerabilities
-          .map((vulnerability) => `${vulnerability.source}:${vulnerability.id}`)
+          .map((vulnerability) => [
+            vulnerability.source,
+            vulnerability.id,
+            vulnerability.severity,
+            String(vulnerability.cvssScore),
+            vulnerability.normalizedSeverity?.rating ?? '',
+            String(vulnerability.normalizedSeverity?.score ?? ''),
+            vulnerability.normalizedSeverity?.source ?? '',
+            vulnerability.normalizedSeverity?.method ?? '',
+            vulnerability.normalizedSeverity?.vector ?? '',
+            vulnerability.title
+          ].join(':'))
           .sort((left, right) => left.localeCompare(right))
           .join('|')
       ].join('::'),

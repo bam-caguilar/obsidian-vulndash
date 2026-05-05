@@ -49,6 +49,14 @@ const severityRank = (severity: string, normalizedSeverity?: NormalizedSeverity)
       }
     })();
 
+const severityScore = (cvssScore: number, normalizedSeverity?: NormalizedSeverity): number => {
+  if (typeof normalizedSeverity?.score === 'number' && Number.isFinite(normalizedSeverity.score)) {
+    return normalizedSeverity.score;
+  }
+
+  return Number.isFinite(cvssScore) ? cvssScore : 0;
+};
+
 export interface VulnerabilityIdentity {
   id: string;
   identifiers: string[];
@@ -140,6 +148,7 @@ export class RelationshipNormalizer {
     for (const [key, entries] of vulnerabilitiesByComponent) {
       vulnerabilitiesByComponent.set(key, entries.sort((left, right) =>
         evidenceRank[left.evidence] - evidenceRank[right.evidence]
+        || severityScore(right.cvssScore, right.normalizedSeverity) - severityScore(left.cvssScore, left.normalizedSeverity)
         || severityRank(right.severity, right.normalizedSeverity) - severityRank(left.severity, left.normalizedSeverity)
         || compareStrings(left.source, right.source)
         || compareStrings(left.id, right.id)
@@ -149,6 +158,7 @@ export class RelationshipNormalizer {
     for (const [key, entries] of vulnerabilitiesByOccurrence) {
       vulnerabilitiesByOccurrence.set(key, entries.sort((left, right) =>
         evidenceRank[left.evidence] - evidenceRank[right.evidence]
+        || severityScore(right.cvssScore, right.normalizedSeverity) - severityScore(left.cvssScore, left.normalizedSeverity)
         || severityRank(right.severity, right.normalizedSeverity) - severityRank(left.severity, left.normalizedSeverity)
         || compareStrings(left.source, right.source)
         || compareStrings(left.id, right.id)

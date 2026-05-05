@@ -1,10 +1,12 @@
 import type {
-  NormalizedSeverity
-} from '../../../domain/sbom/types';
-import type {
   RelatedVulnerabilitySummary,
   TrackedComponent
 } from '../../../application/sbom/types';
+import {
+  formatDisplaySeverity,
+  getSeverityBadgeClassName,
+  type DisplaySeverity
+} from '../../rendering/SeverityBadgeRenderer';
 import type {
   ComponentDetailPanelCallbacks,
   ComponentDetailsRenderer
@@ -14,7 +16,7 @@ import { buildRowPatchPlan } from './buildRowPatchPlan';
 export interface ComponentTableRowModel {
   readonly component: TrackedComponent;
   readonly componentName: string;
-  readonly highestSeverity: NormalizedSeverity | undefined;
+  readonly highestSeverity: DisplaySeverity | undefined;
   readonly identifierLabel: string;
   readonly isExpanded: boolean;
   readonly isSelected: boolean;
@@ -60,9 +62,6 @@ const HEADER_LABELS = [
   'Vulnerabilities',
   'Actions'
 ] as const;
-
-const formatSeverity = (severity: string | undefined): string =>
-  severity ? `${severity.charAt(0).toUpperCase()}${severity.slice(1)}` : 'None';
 
 const createDiv = (
   className?: string,
@@ -368,8 +367,8 @@ export class ComponentTableRenderer {
     const stack = createDiv('vulndash-component-vuln-stack');
     stack.appendChild(createDiv(undefined, String(rowModel.vulnerabilityCount)));
     stack.appendChild(createDiv(
-      `vulndash-severity-pill is-${rowModel.highestSeverity?.toLowerCase() ?? 'none'}`,
-      formatSeverity(rowModel.highestSeverity)
+      getSeverityBadgeClassName(rowModel.highestSeverity),
+      formatDisplaySeverity(rowModel.highestSeverity, 'None')
     ));
     cell.appendChild(stack);
     return cell;

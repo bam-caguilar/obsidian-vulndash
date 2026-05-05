@@ -19,11 +19,11 @@ export interface ComponentFilterBarCallbacks {
 
 const SEVERITY_OPTIONS: Array<{ label: string; value: ComponentSeverityFilter }> = [
   { label: 'Any Severity', value: 'any' },
-  { label: 'Informational+', value: 'informational' },
-  { label: 'Low+', value: 'low' },
-  { label: 'Medium+', value: 'medium' },
-  { label: 'High+', value: 'high' },
-  { label: 'Critical', value: 'critical' }
+  { label: 'Critical', value: 'critical' },
+  { label: 'High', value: 'high' },
+  { label: 'Medium', value: 'medium' },
+  { label: 'Low', value: 'low' },
+  { label: 'Unknown', value: 'unknown' }
 ];
 
 export class ComponentFilterBar {

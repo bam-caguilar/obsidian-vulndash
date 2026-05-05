@@ -1092,6 +1092,12 @@
   border-color: var(--background-modifier-border);
 }
 
+.vulndash-severity-pill.is-unknown {
+  color: var(--text-normal);
+  background: color-mix(in srgb, var(--color-cyan, #06b6d4) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-cyan, #06b6d4) 22%, transparent);
+}
+
 .vulndash-component-detail-panel {
   display: grid;
   gap: 1rem;

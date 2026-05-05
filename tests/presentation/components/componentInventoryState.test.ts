@@ -169,7 +169,7 @@ test('filterTrackedComponents combines search, follow, enabled, vulnerability, s
     enabledOnly: true,
     followedOnly: true,
     searchQuery: 'lodash cve-2026-0001',
-    severityThreshold: 'medium' as const,
+    severityThreshold: 'high' as const,
     sourceFile: 'reports/a.cdx.json',
     sourceFormat: 'cyclonedx' as const,
     vulnerableOnly: true
@@ -395,4 +395,34 @@ test('deriveComponentInventoryState scopes vulnerability counts to the selected 
   assert.equal(derived.components[0]?.vulnerabilityCount, 0);
   assert.equal(derived.components[0]?.highestSeverity, undefined);
   assert.deepEqual(derived.components[0]?.visibleSources.map((source) => source.id), ['component-occurrence::sbom-b::widget']);
+});
+
+test('deriveComponentInventoryState projects unknown vulnerability severity and filters it explicitly', () => {
+  const snapshot = createSnapshot([createComponent({
+    key: 'purl:pkg:npm/unknown-widget@1.2.3',
+    name: 'unknown-widget',
+    purl: 'pkg:npm/unknown-widget@1.2.3',
+    version: '1.2.3'
+  })], undefined, [], new Map([
+    ['component-occurrence::sbom-a::component-1', [createRelatedVulnerability({
+      cvssScore: 0,
+      normalizedSeverity: {
+        method: 'CVSS_V4',
+        rating: 'unknown',
+        source: 'osv-top-level',
+        vector: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N'
+      },
+      severity: 'Unknown'
+    })]]
+  ]));
+
+  const derived = deriveComponentInventoryState(snapshot, {
+    ...createDefaultComponentInventoryFilters(),
+    severityThreshold: 'unknown',
+    vulnerableOnly: true
+  });
+
+  assert.equal(derived.components.length, 1);
+  assert.equal(derived.components[0]?.highestSeverity, 'unknown');
+  assert.equal(derived.components[0]?.relatedVulnerabilities[0]?.severity, 'Unknown');
 });

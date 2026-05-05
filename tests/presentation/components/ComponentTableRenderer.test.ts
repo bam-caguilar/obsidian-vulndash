@@ -239,6 +239,35 @@ test('ComponentTableRenderer patches only dirty rows in place', () => {
   assert.equal(renderer.getLastRenderMetrics()?.removedRows, 0);
 });
 
+test('ComponentTableRenderer renders unknown severity distinctly instead of leaving the badge blank', () => {
+  const host = createRoot() as unknown as HTMLElement;
+  const renderer = createRenderer();
+  const row = createRowModel('purl:pkg:npm/unknown@1.0.0', {
+    highestSeverity: 'unknown',
+    relatedVulnerabilities: [createRelatedVulnerability({
+      cvssScore: 0,
+      normalizedSeverity: {
+        method: 'CVSS_V4',
+        rating: 'unknown',
+        source: 'osv-top-level',
+        vector: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N'
+      },
+      severity: 'Unknown'
+    })],
+    vulnerabilityCount: 1
+  });
+
+  renderer.mount(host);
+  renderer.render([row]);
+
+  const severityCell = getRowByKey(host, row.key).cells.item(5);
+  assert.ok(severityCell);
+  assert.equal(severityCell.textContent.includes('Unknown'), true);
+  const pill = severityCell.querySelector('.vulndash-severity-pill');
+  assert.ok(pill);
+  assert.equal(pill.classList.contains('is-unknown'), true);
+});
+
 test('ComponentTableRenderer sorting reorders existing row nodes', () => {
   const host = createRoot() as unknown as HTMLElement;
   const renderer = createRenderer();
