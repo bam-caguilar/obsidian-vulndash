@@ -148,6 +148,19 @@ const createVulnerability = (id: string): Vulnerability => ({
   updatedAt: '2026-01-02T00:00:00.000Z'
 });
 
+const createLegacyOsvUnknownVulnerability = (id: string): Vulnerability => ({
+  affectedProducts: [],
+  cvssScore: 0,
+  id,
+  publishedAt: '2026-01-01T00:00:00.000Z',
+  references: [`https://example.com/${id}`],
+  severity: 'NONE',
+  source: 'OSV',
+  summary: `${id} summary`,
+  title: `${id} title`,
+  updatedAt: '2026-01-02T00:00:00.000Z'
+});
+
 test('component query records round-trip by PURL', async () => {
   const repository = createRepository();
   const record = createComponentQueryRecord('pkg:npm/example@1.0.0');
@@ -236,6 +249,43 @@ test('loadVulnerabilitiesByCacheKeys rehydrates persisted vulnerabilities by com
   ]);
 
   assert.deepEqual(loaded.map((vulnerability) => vulnerability.id), [second.id, first.id]);
+});
+
+test('persisted normalized severity round-trips through the vulnerability cache', async () => {
+  const repository = createRepository();
+  const vulnerability: Vulnerability = {
+    ...createVulnerability('OSV-2026-3'),
+    normalizedSeverity: {
+      method: 'CVSS_V3',
+      rating: 'high',
+      score: 8.1,
+      source: 'osv-top-level',
+      vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:L'
+    }
+  };
+
+  await repository.importLegacySnapshot('osv', [vulnerability], '2026-04-22T00:00:00.000Z');
+  const loaded = await repository.loadVulnerabilitiesByCacheKeys([
+    buildOsvVulnerabilityCacheKey(vulnerability.id)
+  ]);
+
+  assert.deepEqual(loaded[0]?.normalizedSeverity, vulnerability.normalizedSeverity);
+});
+
+test('legacy cached vulnerabilities are rehydrated with normalized severity when the field is missing', async () => {
+  const repository = createRepository();
+  const vulnerability = createLegacyOsvUnknownVulnerability('OSV-2026-4');
+
+  await repository.importLegacySnapshot('osv', [vulnerability], '2026-04-22T00:00:00.000Z');
+  const loaded = await repository.loadVulnerabilitiesByCacheKeys([
+    buildOsvVulnerabilityCacheKey(vulnerability.id)
+  ]);
+
+  assert.deepEqual(loaded[0]?.normalizedSeverity, {
+    method: 'OSV',
+    rating: 'unknown',
+    source: 'unknown'
+  });
 });
 
 test('iterateCursor continues within the active IndexedDB request turn', async () => {

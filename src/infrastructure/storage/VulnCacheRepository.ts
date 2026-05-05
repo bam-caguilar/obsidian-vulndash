@@ -1,6 +1,7 @@
 import { buildVulnerabilityCacheKey } from '../../application/pipeline/PipelineTypes';
 import type { PipelineSnapshot } from '../../application/pipeline/PipelineTypes';
 import type { Vulnerability } from '../../domain/entities/Vulnerability';
+import { normalizeVulnerabilitySeverity } from '../../domain/vulnerabilities/normalizeVulnerabilitySeverity';
 import type { IOsvQueryCache } from '../clients/osv/IOsvQueryCache';
 import { awaitTransaction, VulnCacheDb } from './VulnCacheDb';
 import {
@@ -33,7 +34,7 @@ export class VulnCacheRepository implements IOsvQueryCache {
     const index = transaction.objectStore(VULN_CACHE_STORES.vulnerabilities).index(VULN_CACHE_INDEXES.byRetentionRank);
     const records = await this.collectCursorValues(index.openCursor(null, 'prev'), limit);
     await awaitTransaction(transaction);
-    return records.map((record) => record.vulnerability);
+    return records.map((record) => this.normalizeLoadedVulnerability(record.vulnerability));
   }
 
   public async loadSourceSnapshot(sourceId: string): Promise<PipelineSnapshot> {
@@ -46,8 +47,9 @@ export class VulnCacheRepository implements IOsvQueryCache {
     const cacheByKey = new Map<string, Vulnerability>();
     const originByKey = new Map<string, string>();
     for (const record of records) {
-      const runtimeCacheKey = buildVulnerabilityCacheKey(record.vulnerability);
-      cacheByKey.set(runtimeCacheKey, record.vulnerability);
+      const normalizedVulnerability = this.normalizeLoadedVulnerability(record.vulnerability);
+      const runtimeCacheKey = buildVulnerabilityCacheKey(normalizedVulnerability);
+      cacheByKey.set(runtimeCacheKey, normalizedVulnerability);
       originByKey.set(runtimeCacheKey, sourceId);
     }
 
@@ -115,7 +117,12 @@ export class VulnCacheRepository implements IOsvQueryCache {
     const createdAtMs = Date.now();
 
     for (const vulnerability of vulnerabilities) {
-      const record = createPersistedVulnerabilityRecord(sourceId, vulnerability, syncedAt, createdAtMs);
+      const record = createPersistedVulnerabilityRecord(
+        sourceId,
+        this.normalizePersistedVulnerability(vulnerability),
+        syncedAt,
+        createdAtMs
+      );
       retainedKeys.add(record.cacheKey);
       store.put(record);
     }
@@ -140,7 +147,12 @@ export class VulnCacheRepository implements IOsvQueryCache {
     const createdAtMs = Date.now();
 
     for (const vulnerability of vulnerabilities) {
-      store.put(createPersistedVulnerabilityRecord(sourceId, vulnerability, lastSeenAt, createdAtMs));
+      store.put(createPersistedVulnerabilityRecord(
+        sourceId,
+        this.normalizePersistedVulnerability(vulnerability),
+        lastSeenAt,
+        createdAtMs
+      ));
     }
 
     await awaitTransaction(transaction);
@@ -300,7 +312,7 @@ export class VulnCacheRepository implements IOsvQueryCache {
     const vulnerabilities: Vulnerability[] = [];
     for (const [, record] of records) {
       if (record) {
-        vulnerabilities.push(record.vulnerability);
+        vulnerabilities.push(this.normalizeLoadedVulnerability(record.vulnerability));
       }
     }
 
@@ -327,7 +339,7 @@ export class VulnCacheRepository implements IOsvQueryCache {
     const result = new Map<string, PersistedVulnerabilityRecord>();
     for (const [key, record] of records) {
       if (record) {
-        result.set(key, record);
+        result.set(key, this.normalizePersistedRecord(record));
       }
     }
 
@@ -347,9 +359,24 @@ export class VulnCacheRepository implements IOsvQueryCache {
   ): Promise<PersistedVulnerabilityRecord[]> {
     const values: PersistedVulnerabilityRecord[] = [];
     await this.iterateCursor(request, (cursor) => {
-      values.push(cursor.value as PersistedVulnerabilityRecord);
+      values.push(this.normalizePersistedRecord(cursor.value as PersistedVulnerabilityRecord));
     }, limit);
     return values;
+  }
+
+  private normalizeLoadedVulnerability(vulnerability: Vulnerability): Vulnerability {
+    return normalizeVulnerabilitySeverity(vulnerability);
+  }
+
+  private normalizePersistedRecord(record: PersistedVulnerabilityRecord): PersistedVulnerabilityRecord {
+    return {
+      ...record,
+      vulnerability: this.normalizeLoadedVulnerability(record.vulnerability)
+    };
+  }
+
+  private normalizePersistedVulnerability(vulnerability: Vulnerability): Vulnerability {
+    return this.normalizeLoadedVulnerability(vulnerability);
   }
 
   private async listComponentQueryRecords(): Promise<PersistedComponentQueryRecord[]> {
