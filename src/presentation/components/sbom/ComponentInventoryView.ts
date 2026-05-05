@@ -3,15 +3,18 @@ import type {
   ComponentInventoryWorkspaceSnapshot,
   ComponentPurlMatchSummary,
   ComponentPurlQueryState
-} from '../../application/sbom/types';
+} from '../../../application/sbom/types';
 import { ComponentFilterBar } from './ComponentFilterBar';
 import {
   type ComponentInventoryDisplayEntry,
   createDefaultComponentInventoryFilters,
   deriveComponentInventoryState
 } from './ComponentInventoryStore';
-import { renderComponentRow, type ComponentRowRendererCallbacks } from './ComponentRowRenderer';
 import type { ComponentDetailsRenderer } from './ComponentDetailPanel';
+import {
+  ComponentTableRenderer,
+  type ComponentTableRowModel
+} from './ComponentTableRenderer';
 
 export interface ComponentInventoryViewCallbacks {
   detailsRenderer: ComponentDetailsRenderer;
@@ -41,19 +44,55 @@ export class ComponentInventoryView {
       this.renderResults();
     }
   });
-  private filters = createDefaultComponentInventoryFilters();
+  private diagnosticsHostEl: HTMLDivElement | null = null;
   private filterHostEl: HTMLDivElement | null = null;
+  private filters = createDefaultComponentInventoryFilters();
   private isActive = false;
   private isDirty = true;
+  private issuesHostEl: HTMLDivElement | null = null;
+  private lastReadySnapshot: ComponentInventoryWorkspaceSnapshot | null = null;
   private loadState: InventoryLoadState = { status: 'idle' };
   private renderToken = 0;
   private resultsHostEl: HTMLDivElement | null = null;
   private rootEl: HTMLDivElement | null = null;
+  private selectedComponentKey: string | null = null;
+  private stateHostEl: HTMLDivElement | null = null;
   private summaryHostEl: HTMLDivElement | null = null;
+  private tableHostEl: HTMLDivElement | null = null;
+  private readonly tableRenderer: ComponentTableRenderer;
+  private visibleRowKeys: string[] = [];
 
   public constructor(
     private readonly callbacks: ComponentInventoryViewCallbacks
-  ) {}
+  ) {
+    this.tableRenderer = new ComponentTableRenderer({
+      detailsRenderer: this.callbacks.detailsRenderer,
+      onDisableComponent: (componentKey) => this.handlePreferenceAction(componentKey, 'disable'),
+      onEnableComponent: (componentKey) => this.handlePreferenceAction(componentKey, 'enable'),
+      onFollowComponent: (componentKey) => this.handlePreferenceAction(componentKey, 'follow'),
+      onSelectComponent: (componentKey) => {
+        if (this.selectedComponentKey === componentKey) {
+          return;
+        }
+
+        this.selectedComponentKey = componentKey;
+        this.renderResults();
+      },
+      onToggleExpanded: (key, expanded) => {
+        this.selectedComponentKey = key;
+        if (expanded) {
+          this.expandedKeys.add(key);
+        } else {
+          this.expandedKeys.delete(key);
+        }
+        this.renderResults();
+      },
+      onUnfollowComponent: (componentKey) => this.handlePreferenceAction(componentKey, 'unfollow'),
+      ...(this.callbacks.onOpenNote !== undefined
+        ? { onOpenNote: this.callbacks.onOpenNote }
+        : {})
+    });
+  }
 
   public mount(containerEl: HTMLElement): void {
     if (this.rootEl) {
@@ -61,22 +100,29 @@ export class ComponentInventoryView {
     }
 
     this.rootEl = containerEl.createDiv({ cls: 'vulndash-component-inventory-view' });
-    this.summaryHostEl = this.rootEl.createDiv();
+    this.summaryHostEl = this.rootEl.createDiv({ cls: 'vulndash-component-summary-region' });
     this.filterHostEl = this.rootEl.createDiv({ cls: 'vulndash-component-inventory-filter-shell' });
-    this.resultsHostEl = this.rootEl.createDiv();
+    this.resultsHostEl = this.rootEl.createDiv({ cls: 'vulndash-component-inventory-results' });
+    this.stateHostEl = this.resultsHostEl.createDiv({ cls: 'vulndash-component-state-region' });
+    this.issuesHostEl = this.resultsHostEl.createDiv({ cls: 'vulndash-component-issues-region' });
+    this.tableHostEl = this.resultsHostEl.createDiv({ cls: 'vulndash-component-table-region' });
+    this.diagnosticsHostEl = this.resultsHostEl.createDiv({ cls: 'vulndash-component-diagnostics-region' });
+    this.tableRenderer.mount(this.tableHostEl);
+
+    this.setRegionVisible(this.stateHostEl, false);
+    this.setRegionVisible(this.issuesHostEl, false);
+    this.setRegionVisible(this.tableHostEl, false);
+    this.setRegionVisible(this.diagnosticsHostEl, false);
   }
 
   public async setActive(active: boolean): Promise<void> {
     this.isActive = active;
-
     if (this.rootEl) {
       this.rootEl.style.display = active ? '' : 'none';
     }
-
     if (!active) {
       return;
     }
-
     if (this.isDirty || this.loadState.status === 'idle') {
       await this.refresh();
       return;
@@ -94,11 +140,19 @@ export class ComponentInventoryView {
   }
 
   public destroy(): void {
+    this.tableRenderer.destroy();
+    this.lastReadySnapshot = null;
+    this.selectedComponentKey = null;
+    this.visibleRowKeys = [];
     this.rootEl?.remove();
     this.rootEl = null;
     this.summaryHostEl = null;
     this.filterHostEl = null;
     this.resultsHostEl = null;
+    this.stateHostEl = null;
+    this.issuesHostEl = null;
+    this.tableHostEl = null;
+    this.diagnosticsHostEl = null;
   }
 
   private async refresh(): Promise<void> {
@@ -109,7 +163,6 @@ export class ComponentInventoryView {
     const activeToken = ++this.renderToken;
     this.isDirty = false;
     this.loadState = { status: 'loading' };
-    this.renderSummaryLoading();
     this.renderFilterBar();
     this.renderResults();
 
@@ -125,7 +178,11 @@ export class ComponentInventoryView {
           this.expandedKeys.delete(expandedKey);
         }
       }
+      if (this.selectedComponentKey && !availableKeys.has(this.selectedComponentKey)) {
+        this.selectedComponentKey = null;
+      }
 
+      this.lastReadySnapshot = snapshot;
       this.loadState = {
         snapshot,
         status: 'ready'
@@ -144,9 +201,17 @@ export class ComponentInventoryView {
         message,
         status: 'error'
       };
-      this.renderSummaryError(message);
+      this.renderFilterBar();
       this.renderResults();
     }
+  }
+
+  private getRenderableSnapshot(): ComponentInventoryWorkspaceSnapshot | null {
+    if (this.loadState.status === 'ready') {
+      return this.loadState.snapshot;
+    }
+
+    return this.lastReadySnapshot;
   }
 
   private renderFilterBar(): void {
@@ -154,7 +219,7 @@ export class ComponentInventoryView {
       return;
     }
 
-    const snapshot = this.loadState.status === 'ready' ? this.loadState.snapshot : null;
+    const snapshot = this.getRenderableSnapshot();
     const derivedState = snapshot
       ? deriveComponentInventoryState(snapshot, this.filters)
       : null;
@@ -168,36 +233,32 @@ export class ComponentInventoryView {
   }
 
   private renderResults(): void {
-    if (!this.resultsHostEl || !this.summaryHostEl) {
+    if (!this.summaryHostEl) {
       return;
     }
 
-    this.resultsHostEl.empty();
-
-    if (this.loadState.status === 'loading' || this.loadState.status === 'idle') {
-      this.renderSummaryLoading();
-      this.renderStateCard({
-        body: 'Scanning enabled SBOM files and merging parsed components.',
-        title: 'Loading component inventory'
-      });
+    const snapshot = this.getRenderableSnapshot();
+    if (!snapshot) {
+      if (this.loadState.status === 'error') {
+        this.renderSummaryError(this.loadState.message);
+        this.renderStateCard({
+          body: this.loadState.message,
+          tone: 'error',
+          title: 'Component inventory unavailable'
+        });
+      } else {
+        this.renderSummaryLoading();
+        this.renderStateCard({
+          body: 'Scanning enabled SBOM files and merging parsed components.',
+          title: 'Loading component inventory'
+        });
+      }
+      this.renderIssues(null);
+      this.renderTable([]);
+      this.renderPurlDiagnostics([]);
       return;
     }
 
-    if (this.loadState.status === 'error') {
-      this.renderSummaryError(this.loadState.message);
-      this.renderStateCard({
-        body: this.loadState.message,
-        tone: 'error',
-        title: 'Component inventory unavailable'
-      });
-      return;
-    }
-
-    if (this.loadState.status !== 'ready') {
-      return;
-    }
-
-    const { snapshot } = this.loadState;
     const inventory = snapshot.inventory;
     const derivedState = deriveComponentInventoryState(snapshot, this.filters);
     this.renderSummaryReady(inventory, derivedState.components.length, derivedState.summary);
@@ -207,6 +268,9 @@ export class ComponentInventoryView {
         body: 'Add one or more SBOM files in the SBOM manager to build a merged component inventory.',
         title: 'No SBOM files configured'
       });
+      this.renderIssues(null);
+      this.renderTable([]);
+      this.renderPurlDiagnostics([]);
       return;
     }
 
@@ -215,6 +279,9 @@ export class ComponentInventoryView {
         body: 'The configured SBOM files are all disabled. Enable at least one source to populate the inventory.',
         title: 'No enabled SBOM sources'
       });
+      this.renderIssues(null);
+      this.renderTable([]);
+      this.renderPurlDiagnostics([]);
       return;
     }
 
@@ -225,6 +292,8 @@ export class ComponentInventoryView {
         title: 'No components could be loaded'
       });
       this.renderIssues(inventory);
+      this.renderTable([]);
+      this.renderPurlDiagnostics([]);
       return;
     }
 
@@ -233,11 +302,10 @@ export class ComponentInventoryView {
         body: 'Enabled SBOM files were loaded, but no components were found.',
         title: 'No components detected'
       });
+      this.renderIssues(null);
+      this.renderTable([]);
+      this.renderPurlDiagnostics([]);
       return;
-    }
-
-    if (inventory.issues.length > 0) {
-      this.renderIssues(inventory);
     }
 
     if (derivedState.components.length === 0) {
@@ -245,13 +313,45 @@ export class ComponentInventoryView {
         body: derivedState.hasActiveFilters
           ? 'Try broadening the current filters or clearing the search query.'
           : 'No components are available to display.',
-        title: derivedState.hasActiveFilters ? 'No results matched the current filters' : 'No components available'
+        title: derivedState.hasActiveFilters
+          ? 'No results matched the current filters'
+          : 'No components available'
       });
+      this.renderIssues(inventory.issues.length > 0 ? inventory : null);
+      this.renderTableWithOptions([], {
+        preserveSelection: derivedState.hasActiveFilters,
+        retainShellWhenEmpty: derivedState.hasActiveFilters
+      });
+      this.renderPurlDiagnostics([]);
       return;
     }
 
-    this.renderTable(derivedState.components);
+    const transientState = this.getTransientStateCard();
+    this.renderStateCard(transientState);
+    this.renderIssues(inventory.issues.length > 0 ? inventory : null);
+    this.renderTable(this.buildTableRowModels(derivedState.components));
     this.renderPurlDiagnostics(derivedState.purlMatches);
+  }
+
+  private getTransientStateCard():
+    | { body: string; title: string; tone?: 'error' }
+    | null {
+    if (this.loadState.status === 'loading' && this.lastReadySnapshot) {
+      return {
+        body: 'Refreshing component inventory in the background.',
+        title: 'Sync in progress'
+      };
+    }
+
+    if (this.loadState.status === 'error' && this.lastReadySnapshot) {
+      return {
+        body: this.loadState.message,
+        tone: 'error',
+        title: 'Component inventory refresh failed'
+      };
+    }
+
+    return null;
   }
 
   private renderSummaryLoading(): void {
@@ -261,10 +361,10 @@ export class ComponentInventoryView {
 
     this.summaryHostEl.empty();
     const grid = this.summaryHostEl.createDiv({ cls: 'vulndash-component-summary-grid' });
-    this.createSummaryCard(grid, 'Components', '…');
-    this.createSummaryCard(grid, 'Vulnerable', '…');
-    this.createSummaryCard(grid, 'Followed', '…');
-    this.createSummaryCard(grid, 'Enabled', '…');
+    this.createSummaryCard(grid, 'Components', '.');
+    this.createSummaryCard(grid, 'Vulnerable', '.');
+    this.createSummaryCard(grid, 'Followed', '.');
+    this.createSummaryCard(grid, 'Enabled', '.');
   }
 
   private renderSummaryError(message: string): void {
@@ -293,20 +393,31 @@ export class ComponentInventoryView {
     }
 
     this.summaryHostEl.empty();
-
     const grid = this.summaryHostEl.createDiv({ cls: 'vulndash-component-summary-grid' });
     this.createSummaryCard(grid, 'Components', String(summary.totalCount), `${visibleCount} visible`);
     this.createSummaryCard(grid, 'Vulnerable', String(summary.vulnerableCount));
     this.createSummaryCard(grid, 'Followed', String(summary.followedCount));
-    this.createSummaryCard(grid, 'Enabled', String(summary.enabledCount), `${snapshot.enabledSbomCount} active SBOM source${snapshot.enabledSbomCount === 1 ? '' : 's'}`);
+    this.createSummaryCard(
+      grid,
+      'Enabled',
+      String(summary.enabledCount),
+      `${snapshot.enabledSbomCount} active SBOM source${snapshot.enabledSbomCount === 1 ? '' : 's'}`
+    );
   }
 
-  private renderIssues(snapshot: ComponentInventorySnapshot): void {
-    const issueCard = this.resultsHostEl?.createDiv({ cls: 'vulndash-component-issue-card vulndash-card-shell' });
-    if (!issueCard) {
+  private renderIssues(snapshot: ComponentInventorySnapshot | null): void {
+    if (!this.issuesHostEl) {
       return;
     }
 
+    this.issuesHostEl.empty();
+    if (!snapshot || snapshot.issues.length === 0) {
+      this.setRegionVisible(this.issuesHostEl, false);
+      return;
+    }
+
+    this.setRegionVisible(this.issuesHostEl, true);
+    const issueCard = this.issuesHostEl.createDiv({ cls: 'vulndash-component-issue-card vulndash-card-shell' });
     const heading = snapshot.catalog.componentCount > 0
       ? 'Some SBOM sources could not be refreshed'
       : 'Enabled SBOM sources failed to load';
@@ -336,74 +447,68 @@ export class ComponentInventoryView {
     }
   }
 
-  private renderTable(
-    components: readonly ComponentInventoryDisplayEntry[]
+  private renderTable(rows: readonly ComponentTableRowModel[]): void {
+    this.renderTableWithOptions(rows, {});
+  }
+
+  private renderTableWithOptions(
+    rows: readonly ComponentTableRowModel[],
+    options: {
+      preserveSelection?: boolean;
+      retainShellWhenEmpty?: boolean;
+    }
   ): void {
-    const tableShell = this.resultsHostEl?.createDiv({ cls: 'vulndash-component-table-shell vulndash-card-shell' });
-    if (!tableShell) {
+    if (!this.tableHostEl) {
       return;
     }
 
-    const table = tableShell.createEl('table', { cls: 'vulndash-component-table' });
-    const head = table.createEl('thead');
-    const headRow = head.createEl('tr');
-    for (const label of ['Project', 'SBOM File', 'Component', 'Version', 'Identifier', 'Vulnerabilities', 'Actions']) {
-      headRow.createEl('th', { text: label });
+    if (rows.length === 0) {
+      this.visibleRowKeys = [];
+      if (!options.preserveSelection) {
+        this.selectedComponentKey = null;
+      }
+
+      if (options.retainShellWhenEmpty) {
+        this.setRegionVisible(this.tableHostEl, true);
+        this.tableRenderer.render([]);
+        return;
+      }
+
+      this.setRegionVisible(this.tableHostEl, false);
+      return;
     }
 
-    const body = table.createEl('tbody');
-    for (const entry of components) {
-      const { component } = entry;
-      const rowCallbacks: ComponentRowRendererCallbacks = {
-        detailsRenderer: this.callbacks.detailsRenderer,
-        effectiveVulnerabilityCount: entry.vulnerabilityCount,
-        onDisable: (trackedComponent) => {
-          void this.handlePreferenceAction(trackedComponent.key, 'disable');
-        },
-        onEnable: (trackedComponent) => {
-          void this.handlePreferenceAction(trackedComponent.key, 'enable');
-        },
-        onFollow: (trackedComponent) => {
-          void this.handlePreferenceAction(trackedComponent.key, 'follow');
-        },
-        onToggleExpanded: (componentKey, expanded) => {
-          if (expanded) {
-            this.expandedKeys.add(componentKey);
-          } else {
-            this.expandedKeys.delete(componentKey);
+    const nextVisibleKeys = rows.map((row) => row.key);
+    this.selectedComponentKey = this.reconcileSelectedComponentKey(nextVisibleKeys);
+    this.visibleRowKeys = [...nextVisibleKeys];
+    this.setRegionVisible(this.tableHostEl, true);
+    this.tableRenderer.render(rows.map((row) =>
+      row.key === this.selectedComponentKey || (!this.selectedComponentKey && row.isExpanded)
+        ? {
+            ...row,
+            isSelected: true
           }
-          this.renderResults();
-        },
-        onUnfollow: (trackedComponent) => {
-          void this.handlePreferenceAction(trackedComponent.key, 'unfollow');
-        },
-        visibleSources: entry.visibleSources
-      };
-      if (entry.highestSeverity) {
-        rowCallbacks.effectiveHighestSeverity = entry.highestSeverity;
-      }
-
-      if (this.callbacks.onOpenNote) {
-        rowCallbacks.onOpenNote = this.callbacks.onOpenNote;
-      }
-      if (entry.relatedVulnerabilities.length > 0) {
-        rowCallbacks.relatedVulnerabilities = entry.relatedVulnerabilities;
-      }
-
-      renderComponentRow(body, component, this.expandedKeys.has(component.key), rowCallbacks);
-    }
+        : row
+    ));
   }
 
   private renderPurlDiagnostics(
     purlMatches: readonly ComponentPurlMatchSummary[]
   ): void {
-    const diagnosticsShell = this.resultsHostEl?.createDiv({
-      cls: 'vulndash-component-diagnostics-shell vulndash-card-shell'
-    });
-    if (!diagnosticsShell) {
+    if (!this.diagnosticsHostEl) {
       return;
     }
 
+    this.diagnosticsHostEl.empty();
+    if (!this.tableHostEl || this.tableHostEl.style.display === 'none') {
+      this.setRegionVisible(this.diagnosticsHostEl, false);
+      return;
+    }
+
+    this.setRegionVisible(this.diagnosticsHostEl, true);
+    const diagnosticsShell = this.diagnosticsHostEl.createDiv({
+      cls: 'vulndash-component-diagnostics-shell vulndash-card-shell'
+    });
     diagnosticsShell.createEl('h3', { text: 'Vulnerabilities By PURL' });
     diagnosticsShell.createEl('p', {
       cls: 'vulndash-muted-copy',
@@ -441,7 +546,6 @@ export class ComponentInventoryView {
     const body = table.createEl('tbody');
     for (const match of purlMatches) {
       const row = body.createEl('tr');
-
       const componentCell = row.createEl('td');
       const componentStack = componentCell.createDiv({ cls: 'vulndash-component-diagnostics-stack' });
       componentStack.createEl('strong', { text: match.componentName });
@@ -460,7 +564,6 @@ export class ComponentInventoryView {
         cls: 'vulndash-component-table-mono vulndash-component-diagnostics-purl-cell',
         text: match.normalizedPurl
       });
-
       const queryStateCell = row.createEl('td');
       queryStateCell.createSpan({
         cls: this.getQueryStateBadgeClass(match.queryState),
@@ -480,12 +583,12 @@ export class ComponentInventoryView {
           values: match.correlatedMatches.map((entry) => entry.vulnerabilityId)
         }
       ]);
-
       this.renderDiagnosticsValueGroups(row.createEl('td'), [{
         label: 'Cached',
-        values: match.cachedHits.map((entry) => entry.cacheKey).filter((value): value is string => Boolean(value))
+        values: match.cachedHits
+          .map((entry) => entry.cacheKey)
+          .filter((value): value is string => Boolean(value))
       }]);
-
       this.renderDiagnosticsValueGroups(row.createEl('td'), [{
         label: 'Signals',
         values: this.collectEvidenceSignals(match)
@@ -586,7 +689,6 @@ export class ComponentInventoryView {
         default:
           break;
       }
-
       await this.refresh();
     } catch (error) {
       const message = error instanceof Error && error.message.trim()
@@ -596,7 +698,6 @@ export class ComponentInventoryView {
         message,
         status: 'error'
       };
-      this.renderSummaryError(message);
       this.renderResults();
     }
   }
@@ -605,14 +706,21 @@ export class ComponentInventoryView {
     body: string;
     title: string;
     tone?: 'error';
-  }): void {
-    const state = this.resultsHostEl?.createDiv({
-      cls: `vulndash-empty-state vulndash-component-state${copy.tone === 'error' ? ' is-error' : ''}`
-    });
-    if (!state) {
+  } | null): void {
+    if (!this.stateHostEl) {
       return;
     }
 
+    this.stateHostEl.empty();
+    if (!copy) {
+      this.setRegionVisible(this.stateHostEl, false);
+      return;
+    }
+
+    this.setRegionVisible(this.stateHostEl, true);
+    const state = this.stateHostEl.createDiv({
+      cls: `vulndash-empty-state vulndash-component-state${copy.tone === 'error' ? ' is-error' : ''}`
+    });
     state.createEl('h3', { text: copy.title });
     state.createEl('p', { text: copy.body });
   }
@@ -630,4 +738,122 @@ export class ComponentInventoryView {
       card.createDiv({ cls: 'vulndash-component-summary-caption', text: caption });
     }
   }
+
+  private setRegionVisible(element: HTMLElement | null, visible: boolean): void {
+    if (!element) {
+      return;
+    }
+
+    element.style.display = visible ? '' : 'none';
+  }
+
+  private buildTableRowModels(
+    components: readonly ComponentInventoryDisplayEntry[]
+  ): readonly ComponentTableRowModel[] {
+    return components.map((entry) => this.toTableRowModel(entry));
+  }
+
+  private toTableRowModel(
+    entry: ComponentInventoryDisplayEntry
+  ): ComponentTableRowModel {
+    const projectNames = uniqueNonEmptyValues(entry.visibleSources.map((source) => source.projectName));
+    const sbomNames = uniqueNonEmptyValues(entry.visibleSources.map((source) => source.sbomFileName));
+    const projectLabel = projectNames[0] ?? 'Unassigned Project';
+    const sbomLabel = sbomNames[0] ?? 'Unknown SBOM';
+    const projectCaption = projectNames.length > 1
+      ? `${projectNames.length} projects in scope`
+      : undefined;
+    const sbomCaption = sbomNames.length > 1
+      ? `${sbomNames.length} SBOM files in scope`
+      : undefined;
+    const supplierLabel = entry.component.supplier?.trim() || 'Unknown supplier';
+    const versionLabel = entry.component.version?.trim() || 'No version';
+    const identifierLabel = entry.component.purl?.trim()
+      || entry.component.cpe?.trim()
+      || 'None';
+
+    return {
+      component: entry.component,
+      componentName: entry.component.name,
+      highestSeverity: entry.highestSeverity,
+      identifierLabel,
+      isExpanded: this.expandedKeys.has(entry.component.key),
+      isSelected: this.selectedComponentKey === entry.component.key,
+      key: entry.component.key,
+      ...(projectCaption ? { projectCaption } : {}),
+      projectLabel,
+      relatedVulnerabilities: entry.relatedVulnerabilities,
+      rowStateHash: [
+        entry.component.key,
+        projectLabel,
+        projectCaption ?? '',
+        sbomLabel,
+        sbomCaption ?? '',
+        entry.component.name,
+        supplierLabel,
+        versionLabel,
+        identifierLabel,
+        String(entry.vulnerabilityCount),
+        entry.highestSeverity ?? '',
+        entry.component.isEnabled ? 'enabled' : 'disabled',
+        entry.component.isFollowed ? 'followed' : 'unfollowed',
+        this.selectedComponentKey === entry.component.key ? 'selected' : 'unselected',
+        this.expandedKeys.has(entry.component.key) ? 'expanded' : 'collapsed',
+        entry.component.formats.join(','),
+        entry.relatedVulnerabilities
+          .map((vulnerability) => [
+            vulnerability.source,
+            vulnerability.id,
+            vulnerability.severity,
+            String(vulnerability.cvssScore),
+            vulnerability.normalizedSeverity?.rating ?? '',
+            String(vulnerability.normalizedSeverity?.score ?? ''),
+            vulnerability.normalizedSeverity?.source ?? '',
+            vulnerability.normalizedSeverity?.method ?? '',
+            vulnerability.normalizedSeverity?.vector ?? '',
+            vulnerability.title
+          ].join(':'))
+          .sort((left, right) => left.localeCompare(right))
+          .join('|')
+      ].join('::'),
+      ...(sbomCaption ? { sbomCaption } : {}),
+      sbomLabel,
+      supplierLabel,
+      versionLabel,
+      vulnerabilityCount: entry.vulnerabilityCount
+    };
+  }
+
+  private reconcileSelectedComponentKey(
+    nextVisibleKeys: readonly string[]
+  ): string | null {
+    if (nextVisibleKeys.length === 0) {
+      return null;
+    }
+
+    if (!this.selectedComponentKey) {
+      return this.expandedKeys.size > 0
+        ? nextVisibleKeys.find((key) => this.expandedKeys.has(key)) ?? null
+        : null;
+    }
+
+    if (nextVisibleKeys.includes(this.selectedComponentKey)) {
+      return this.selectedComponentKey;
+    }
+
+    const previousIndex = this.visibleRowKeys.indexOf(this.selectedComponentKey);
+    if (previousIndex >= 0) {
+      const adjacentIndex = Math.min(previousIndex, nextVisibleKeys.length - 1);
+      return nextVisibleKeys[adjacentIndex] ?? null;
+    }
+
+    return nextVisibleKeys.find((key) => this.expandedKeys.has(key)) ?? nextVisibleKeys[0] ?? null;
+  }
 }
+
+const uniqueNonEmptyValues = (
+  values: ReadonlyArray<string | undefined>
+): string[] =>
+  Array.from(new Set(values
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))));

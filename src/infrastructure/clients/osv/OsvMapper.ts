@@ -1,34 +1,32 @@
 import type {
   Vulnerability,
   VulnerabilityAffectedPackage,
+  VulnerabilitySeverityHint,
   VulnerabilityMetadata,
   VulnerabilitySourceUrls
 } from '../../../domain/entities/Vulnerability';
-import type { Severity } from '../../../domain/value-objects/Severity';
-import { classifySeverity } from '../../../domain/value-objects/CvssScore';
-import { parseCvssScore } from '../../../domain/services/CvssVectorParser';
+import { resolveSeverityRating } from '../../../domain/vulnerabilities/SeverityRating';
 import { PurlNormalizer } from '../../../domain/services/PurlNormalizer';
+import type { CvssCalculator } from '../../../domain/vulnerabilities/CvssCalculator';
+import type {
+  NormalizedSeverity,
+  NormalizedSeveritySource
+} from '../../../domain/vulnerabilities/NormalizedSeverity';
+import {
+  createVulnerabilitySeverityPolicy,
+  type VulnerabilitySeverityPolicy
+} from '../../../domain/vulnerabilities/VulnerabilitySeverityPolicy';
+import {
+  createVulnerabilitySeverityResolver,
+  type VulnerabilitySeverityCandidate,
+  type VulnerabilitySeverityResolver
+} from '../../../domain/vulnerabilities/VulnerabilitySeverityResolver';
+import { createCvssVectorCalculator } from '../../security/CvssVectorCalculator';
 import { sanitizeMarkdown, sanitizeText, sanitizeUrl } from '../../security/sanitize';
 import type { OsvAffectedPayload, OsvSeverityPayload, OsvVulnerabilityPayload } from './OsvTypes';
 
 const OSV_HTML_URL_PREFIX = 'https://osv.dev/vulnerability/';
 const OSV_API_URL_PREFIX = 'https://api.osv.dev/v1/vulns/';
-
-const severityToRepresentativeScore = (severity: Severity): number => {
-  switch (severity) {
-    case 'CRITICAL':
-      return 9.5;
-    case 'HIGH':
-      return 8;
-    case 'MEDIUM':
-      return 5.5;
-    case 'LOW':
-      return 2.5;
-    case 'NONE':
-    default:
-      return 0;
-  }
-};
 
 const uniqueNonEmpty = (values: readonly string[]): string[] => {
   const seen = new Set<string>();
@@ -52,82 +50,53 @@ const uniqueNonEmpty = (values: readonly string[]): string[] => {
   return result;
 };
 
-const normalizeSeverityLabel = (value: string | undefined): Severity | undefined => {
-  const normalized = sanitizeText(value ?? '').toLowerCase();
-  switch (normalized) {
-    case 'critical':
-      return 'CRITICAL';
-    case 'high':
-      return 'HIGH';
-    case 'medium':
-    case 'moderate':
-      return 'MEDIUM';
-    case 'low':
-      return 'LOW';
-    case 'none':
-    case 'informational':
-    case 'info':
-    case 'unknown':
-    case 'unscored':
-      return 'NONE';
-    default:
-      return undefined;
-  }
-};
-
-const extractNumericCvssScore = (severity: OsvSeverityPayload): number | undefined => {
-  if (!severity.type.toUpperCase().startsWith('CVSS')) {
+const cloneSeverityPayloads = (
+  severityPayloads: readonly OsvSeverityPayload[] | undefined
+): readonly VulnerabilitySeverityHint[] | undefined => {
+  if (!severityPayloads || severityPayloads.length === 0) {
     return undefined;
   }
 
-  return parseCvssScore(severity.score, severity.type);
+  const normalized = severityPayloads
+    .map((severityPayload) => {
+      const type = sanitizeText(severityPayload.type);
+      const score = sanitizeText(severityPayload.score);
+      if (!type || !score) {
+        return null;
+      }
+
+      return Object.freeze({
+        score,
+        type
+      } satisfies VulnerabilitySeverityHint);
+    })
+    .filter((severityPayload): severityPayload is VulnerabilitySeverityHint => severityPayload !== null);
+
+  return normalized.length > 0 ? normalized : undefined;
 };
 
-const collectSeverityPayloads = (payload: OsvVulnerabilityPayload): OsvSeverityPayload[] => [
-  ...(payload.severity ?? []),
-  ...(payload.affected ?? []).flatMap((affected) => affected.severity ?? [])
-];
-
-const resolveSeverity = (payload: OsvVulnerabilityPayload): { cvssScore: number; severity: Severity } => {
-  for (const severityPayload of collectSeverityPayloads(payload)) {
-    const cvssScore = extractNumericCvssScore(severityPayload);
-    if (cvssScore !== undefined) {
-      return {
-        cvssScore,
-        severity: classifySeverity(cvssScore)
-      };
-    }
+const getSeverityTypePriority = (type: string | undefined): number => {
+  const normalized = sanitizeText(type ?? '').toUpperCase();
+  if (normalized.includes('CVSS_V4')) {
+    return 0;
+  }
+  if (normalized.includes('CVSS_V3')) {
+    return 1;
+  }
+  if (normalized.includes('CVSS_V2')) {
+    return 2;
   }
 
-  const databaseSpecificSeverity = normalizeSeverityLabel(
-    payload.database_specific?.severity
-    ?? payload.affected?.find((affected) => affected.database_specific?.severity)?.database_specific?.severity
-  );
-  if (databaseSpecificSeverity) {
-    return {
-      cvssScore: severityToRepresentativeScore(databaseSpecificSeverity),
-      severity: databaseSpecificSeverity
-    };
-  }
-
-  const fallbackSeverity = normalizeSeverityLabel(
-    collectSeverityPayloads(payload)
-      .map((severityPayload) => severityPayload.score)
-      .find((value) => normalizeSeverityLabel(value) !== undefined)
-    ?? payload.affected?.find((affected) => normalizeSeverityLabel(affected.ecosystem_specific?.severity) !== undefined)?.ecosystem_specific?.severity
-  );
-  if (fallbackSeverity) {
-    return {
-      cvssScore: severityToRepresentativeScore(fallbackSeverity),
-      severity: fallbackSeverity
-    };
-  }
-
-  return {
-    cvssScore: 0,
-    severity: 'NONE'
-  };
+  return 3;
 };
+
+const sortSeverityPayloadsForPriority = (
+  severityPayloads: readonly OsvSeverityPayload[] | undefined
+): readonly OsvSeverityPayload[] =>
+  [...(severityPayloads ?? [])].sort((left, right) =>
+    getSeverityTypePriority(left.type) - getSeverityTypePriority(right.type)
+    || sanitizeText(left.type).localeCompare(sanitizeText(right.type))
+    || sanitizeText(left.score).localeCompare(sanitizeText(right.score)));
 
 const extractPurlVersion = (purl: string): string | undefined => {
   const hashIndex = purl.indexOf('#');
@@ -224,12 +193,14 @@ const toAffectedPackage = (affected: OsvAffectedPayload): VulnerabilityAffectedP
 
   const version = parsedPurl?.version ?? (normalizedPurl ? extractPurlVersion(normalizedPurl) : undefined);
   const vulnerableVersionRange = buildVersionRange(affected);
+  const severity = cloneSeverityPayloads(affected.severity);
 
   return {
     name: packageName,
     ...(ecosystem ? { ecosystem } : {}),
     ...(normalizedPurl ? { evidence: 'payload-purl' as const } : {}),
     ...(normalizedPurl ? { purl: normalizedPurl } : {}),
+    ...(severity ? { severity } : {}),
     ...(version ? { version } : {}),
     ...(vulnerableVersionRange ? { vulnerableVersionRange } : {})
   };
@@ -271,7 +242,12 @@ const buildStableId = (payload: OsvVulnerabilityPayload): string => {
 };
 
 export class OsvMapper {
-  public constructor(private readonly sourceName: string) {}
+  public constructor(
+    private readonly sourceName: string,
+    private readonly cvssCalculator: CvssCalculator = createCvssVectorCalculator(),
+    private readonly severityResolver: VulnerabilitySeverityResolver = createVulnerabilitySeverityResolver(),
+    private readonly severityPolicy: VulnerabilitySeverityPolicy = createVulnerabilitySeverityPolicy()
+  ) {}
 
   public normalize(payload: OsvVulnerabilityPayload, queriedPurl?: string): Vulnerability {
     const id = buildStableId(payload);
@@ -279,7 +255,12 @@ export class OsvMapper {
     const updatedAt = sanitizeText(payload.modified ?? publishedAt);
     const title = sanitizeText(payload.summary ?? id ?? 'OSV Advisory');
     const summary = sanitizeMarkdown(payload.details ?? payload.summary ?? 'No summary provided');
-    const { cvssScore, severity } = resolveSeverity(payload);
+    const normalizedSeverity = this.resolveNormalizedSeverity(payload, queriedPurl);
+    const resolvedSeverity = this.severityPolicy.resolve({
+      normalizedSeverity
+    });
+    const severity = resolvedSeverity.severity;
+    const cvssScore = resolvedSeverity.score ?? 0;
 
     const affectedPackages = (payload.affected ?? [])
       .map((affected) => toAffectedPackage(affected))
@@ -357,6 +338,10 @@ export class OsvMapper {
     if (affectedPackages.length > 0) {
       metadata.affectedPackages = affectedPackages;
     }
+    const topLevelSeverity = cloneSeverityPayloads(payload.severity);
+    if (topLevelSeverity) {
+      metadata.topLevelSeverity = topLevelSeverity;
+    }
     if (vulnerableVersionRanges.length > 0) {
       metadata.vulnerableVersionRanges = vulnerableVersionRanges;
     }
@@ -372,10 +357,120 @@ export class OsvMapper {
       publishedAt,
       updatedAt,
       cvssScore,
+      normalizedSeverity: resolvedSeverity.normalizedSeverity,
       severity,
       references,
       affectedProducts,
       ...(Object.keys(metadata).length > 0 ? { metadata } : {})
     };
+  }
+
+  private resolveNormalizedSeverity(
+    payload: OsvVulnerabilityPayload,
+    queriedPurl?: string
+  ): NormalizedSeverity {
+    const candidates: VulnerabilitySeverityCandidate[] = [];
+    const matchedAffectedEntries = this.findSeverityRelevantAffectedEntries(payload, queriedPurl);
+
+    for (const affected of matchedAffectedEntries) {
+      candidates.push(...this.buildSeverityCandidates(affected.severity, 'osv-affected'));
+    }
+
+    candidates.push(...this.buildSeverityCandidates(payload.severity, 'osv-top-level'));
+
+    const databaseSpecificSeverity = uniqueNonEmpty([
+      ...matchedAffectedEntries.map((affected) => sanitizeText(
+        affected.database_specific?.severity
+        ?? affected.ecosystem_specific?.severity
+        ?? ''
+      )),
+      sanitizeText(payload.database_specific?.severity ?? '')
+    ]);
+
+    for (const severity of databaseSpecificSeverity) {
+      candidates.push({
+        rating: severity,
+        source: 'database-specific'
+      });
+    }
+
+    return this.severityResolver.resolve({
+      candidates,
+      fallbackSource: 'unknown'
+    });
+  }
+
+  private buildSeverityCandidates(
+    severityPayloads: readonly OsvSeverityPayload[] | undefined,
+    source: NormalizedSeveritySource
+  ): VulnerabilitySeverityCandidate[] {
+    const candidates: VulnerabilitySeverityCandidate[] = [];
+
+    for (const severityPayload of sortSeverityPayloadsForPriority(severityPayloads)) {
+      const score = sanitizeText(severityPayload.score);
+      if (!score) {
+        continue;
+      }
+
+      const calculation = this.cvssCalculator.calculate({
+        score,
+        type: severityPayload.type
+      });
+
+      if (calculation.isSupported && calculation.score !== undefined) {
+        candidates.push({
+          ...(calculation.method ? { method: calculation.method } : {}),
+          score: calculation.score,
+          source,
+          ...(calculation.vector ? { vector: calculation.vector } : {})
+        });
+        continue;
+      }
+
+      const rating = resolveSeverityRating(score);
+      candidates.push({
+        ...(calculation.method ? { method: calculation.method } : {}),
+        ...(rating !== 'unknown' ? { rating } : {}),
+        source,
+        ...(calculation.vector ? { vector: calculation.vector } : {})
+      });
+    }
+
+    return candidates;
+  }
+
+  private findSeverityRelevantAffectedEntries(
+    payload: OsvVulnerabilityPayload,
+    queriedPurl?: string
+  ): readonly OsvAffectedPayload[] {
+    const affectedEntries = [...(payload.affected ?? [])];
+    if (affectedEntries.length === 0) {
+      return [];
+    }
+
+    const normalizedQueriedPurl = PurlNormalizer.normalize(queriedPurl);
+    if (!normalizedQueriedPurl) {
+      return affectedEntries;
+    }
+
+    const exactMatches = affectedEntries.filter((affected) =>
+      PurlNormalizer.normalize(affected.package?.purl) === normalizedQueriedPurl);
+    if (exactMatches.length > 0) {
+      return exactMatches;
+    }
+
+    const queriedPackage = parseNormalizedPurl(normalizedQueriedPurl);
+    if (!queriedPackage) {
+      return affectedEntries;
+    }
+
+    const fallbackMatches = affectedEntries.filter((affected) => {
+      const affectedName = sanitizeText(affected.package?.name ?? '').toLowerCase();
+      const affectedEcosystem = sanitizeText(affected.package?.ecosystem ?? '').toLowerCase();
+      return affectedName === queriedPackage.name.toLowerCase()
+        && affectedEcosystem === queriedPackage.ecosystem.toLowerCase();
+    });
+
+    return fallbackMatches.length > 0 ? fallbackMatches : affectedEntries;
   }
 }

@@ -2,7 +2,10 @@ import type { IHttpClient } from '../../../application/ports/HttpClient';
 import type { FetchVulnerabilityOptions, FetchVulnerabilityResult, VulnerabilityFeed } from '../../../application/ports/VulnerabilityFeed';
 import type { Vulnerability } from '../../../domain/entities/Vulnerability';
 import { filterVulnerabilitiesByDateWindow } from '../../../application/dashboard/PublishedDateWindow';
-import { classifySeverity } from '../../../domain/value-objects/CvssScore';
+import {
+  createVulnerabilitySeverityPolicy,
+  type VulnerabilitySeverityPolicy
+} from '../../../domain/vulnerabilities/VulnerabilitySeverityPolicy';
 import { sanitizeMarkdown, sanitizeText, sanitizeUrl } from '../../security/sanitize';
 import { ClientBase, type FeedSyncControls } from '../common/ClientBase';
 import { extractNextLink } from './GitHubAdvisoryClient';
@@ -23,16 +26,6 @@ type GitHubRepoAdvisoryResponse = GitHubRepoAdvisoryItem[] | { items?: GitHubRep
 
 const normalizeRepoPath = (repoPath: string): string => repoPath.trim().toLowerCase();
 
-const severityToScore = (severity: string | undefined): number => {
-  switch (severity) {
-    case 'critical': return 9.5;
-    case 'high': return 8.0;
-    case 'moderate': return 5.5;
-    case 'low': return 2.5;
-    default: return 0;
-  }
-};
-
 const uniqueNonEmpty = (values: string[]): string[] => {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -51,6 +44,7 @@ const uniqueNonEmpty = (values: string[]): string[] => {
 
 export class GitHubRepoClient extends ClientBase implements VulnerabilityFeed {
   private readonly normalizedRepoPath: string;
+  private readonly severityPolicy: VulnerabilitySeverityPolicy;
 
   public constructor(
     httpClient: IHttpClient,
@@ -62,6 +56,7 @@ export class GitHubRepoClient extends ClientBase implements VulnerabilityFeed {
   ) {
     super(httpClient, name, controls);
     this.normalizedRepoPath = normalizeRepoPath(repoPath);
+    this.severityPolicy = createVulnerabilitySeverityPolicy();
   }
 
   public async fetchVulnerabilities(options: FetchVulnerabilityOptions): Promise<FetchVulnerabilityResult> {
@@ -143,7 +138,12 @@ export class GitHubRepoClient extends ClientBase implements VulnerabilityFeed {
   }
 
   private normalize(advisory: GitHubRepoAdvisoryItem): Vulnerability {
-    const score = advisory.cvss?.score ?? severityToScore(advisory.severity);
+    const resolvedSeverity = this.severityPolicy.resolve({
+      fallbackSource: 'unknown',
+      method: 'GHSA',
+      ...(advisory.cvss?.score !== undefined ? { score: advisory.cvss.score } : {}),
+      ...(advisory.severity ? { severity: advisory.severity } : {})
+    });
     const summary = advisory.description ?? advisory.summary ?? 'No summary provided';
     const publishedAt = advisory.published_at ?? new Date(0).toISOString();
     const updatedAt = advisory.updated_at ?? publishedAt;
@@ -156,8 +156,9 @@ export class GitHubRepoClient extends ClientBase implements VulnerabilityFeed {
       summary: sanitizeMarkdown(summary),
       publishedAt,
       updatedAt,
-      cvssScore: score,
-      severity: classifySeverity(score),
+      cvssScore: resolvedSeverity.score ?? 0,
+      normalizedSeverity: resolvedSeverity.normalizedSeverity,
+      severity: resolvedSeverity.severity,
       references: [sanitizeUrl(advisory.html_url ?? '')].filter(Boolean),
       affectedProducts: uniqueNonEmpty((advisory.vulnerabilities ?? [])
         .map((v) => sanitizeText(v.package?.name ?? '')))

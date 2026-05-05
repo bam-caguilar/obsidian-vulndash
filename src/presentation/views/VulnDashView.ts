@@ -25,14 +25,14 @@ import type { Vulnerability } from '../../domain/entities/Vulnerability';
 import { buildTriageCorrelationKeyForVulnerability } from '../../domain/triage/TriageCorrelation';
 import type { TriageRecord } from '../../domain/triage/TriageRecord';
 import { DEFAULT_TRIAGE_STATE, type TriageState } from '../../domain/triage/TriageState';
-import { ComponentDetailsRenderer } from '../components/ComponentDetailPanel';
-import { ComponentInventoryView } from '../components/ComponentInventoryView';
-import { TriageFilterControl } from '../components/TriageFilterControl';
+import { ComponentDetailsRenderer } from '../components/sbom/ComponentDetailPanel';
+import { ComponentInventoryView } from '../components/sbom/ComponentInventoryView';
+import { TriageFilterControl } from '../components/triage/TriageFilterControl';
 import {
   type VulnerabilityRowColumn,
   type VulnerabilityRowColumnKey,
   VirtualizedVulnTable
-} from '../components/VirtualizedVulnTable';
+} from '../components/vulnerability/VirtualizedVulnTable';
 
 export const VULNDASH_VIEW_TYPE = 'vulndash-dashboard-view';
 

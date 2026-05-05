@@ -1,6 +1,12 @@
 import { App, Component, MarkdownRenderer, normalizePath } from 'obsidian';
-import type { RelatedVulnerabilitySummary, TrackedComponent } from '../../application/sbom/types';
-import { sanitizeText, sanitizeUrl } from '../../infrastructure/security/sanitize';
+import type { RelatedVulnerabilitySummary, TrackedComponent } from '../../../application/sbom/types';
+import { sanitizeText, sanitizeUrl } from '../../../infrastructure/security/sanitize';
+import {
+  formatDisplaySeverity,
+  formatNormalizedSeveritySource,
+  getNormalizedSeverityScore,
+  resolveDisplaySeverity
+} from '../../rendering/SeverityBadgeRenderer';
 
 export interface ComponentDetailPanelCallbacks {
   effectiveHighestSeverity?: string;
@@ -11,6 +17,9 @@ export interface ComponentDetailPanelCallbacks {
 interface RenderableRelatedVulnerability {
   id: string;
   severity?: string | undefined;
+  severityMethod?: string | undefined;
+  severitySource?: string | undefined;
+  severityVector?: string | undefined;
   score?: number | undefined;
   source?: string | undefined;
   summary?: string | undefined;
@@ -22,6 +31,9 @@ interface RenderableRelatedVulnerability {
 interface RenderableEmbeddedVulnerability {
   id: string;
   severity?: string | undefined;
+  severityMethod?: string | undefined;
+  severitySource?: string | undefined;
+  severityVector?: string | undefined;
   score?: number | undefined;
   source?: string | undefined;
   summary?: string | undefined;
@@ -29,13 +41,6 @@ interface RenderableEmbeddedVulnerability {
 }
 
 type RenderableVulnerability = RenderableRelatedVulnerability | RenderableEmbeddedVulnerability;
-
-const formatSeverity = (severity: string | undefined): string => {
-  const safeSeverity = sanitizeText(severity ?? '').trim();
-  return safeSeverity
-    ? `${safeSeverity.charAt(0).toUpperCase()}${safeSeverity.slice(1)}`
-    : 'None';
-};
 
 const formatList = (values: readonly string[]): string => {
   const safeValues = values
@@ -108,8 +113,9 @@ export class ComponentDetailsRenderer extends Component {
     });
 
     const totalVulns = relatedVulnerabilities.length + embeddedOnlyVulnerabilities.length;
-    const severity = formatSeverity(
-      callbacks.effectiveHighestSeverity ?? component.highestSeverity
+    const severity = formatDisplaySeverity(
+      resolveDisplaySeverity(undefined, callbacks.effectiveHighestSeverity ?? component.highestSeverity),
+      'None'
     );
 
     const headerLines: string[] = [
@@ -171,8 +177,14 @@ export class ComponentDetailsRenderer extends Component {
         .slice(0, 10)
         .map((vulnerability) => ({
           id: this.toSafeText(vulnerability.id, 'Unknown Vulnerability'),
-          severity: formatSeverity(vulnerability.severity),
-          score: this.toFiniteNumberOrUndefined(vulnerability.cvssScore),
+          severity: formatDisplaySeverity(
+            resolveDisplaySeverity(vulnerability.normalizedSeverity, vulnerability.severity),
+            'Unknown'
+          ),
+          severityMethod: this.toSafeText(vulnerability.normalizedSeverity?.method, ''),
+          severitySource: this.toSafeText(formatNormalizedSeveritySource(vulnerability.normalizedSeverity), ''),
+          severityVector: this.toSafeText(vulnerability.normalizedSeverity?.vector, ''),
+          score: this.toFiniteNumberOrUndefined(vulnerability.normalizedSeverity?.score),
           source: this.toSafeText(vulnerability.source, ''),
           summary: this.toSafeText(vulnerability.title, ''),
           refs: `${this.toNonNegativeInteger(vulnerability.referenceCount)} reference${vulnerability.referenceCount === 1 ? '' : 's'}`,
@@ -184,8 +196,16 @@ export class ComponentDetailsRenderer extends Component {
         .slice(0, 10)
         .map((vulnerability) => ({
           id: this.toSafeText(vulnerability.id, 'Unknown Vulnerability'),
-          severity: formatSeverity(vulnerability.severity),
-          score: this.toFiniteNumberOrUndefined(vulnerability.score),
+          severity: formatDisplaySeverity(
+            resolveDisplaySeverity(vulnerability.normalizedSeverity, vulnerability.severity),
+            'Unknown'
+          ),
+          severityMethod: this.toSafeText(vulnerability.normalizedSeverity?.method, vulnerability.method ?? ''),
+          severitySource: this.toSafeText(formatNormalizedSeveritySource(vulnerability.normalizedSeverity), ''),
+          severityVector: this.toSafeText(vulnerability.normalizedSeverity?.vector, vulnerability.vector ?? ''),
+          score: this.toFiniteNumberOrUndefined(
+            getNormalizedSeverityScore(vulnerability.normalizedSeverity, vulnerability.score)
+          ),
           source: this.toSafeText(vulnerability.sourceName, ''),
           summary: this.toSafeText(vulnerability.description, ''),
           sourceUrl: this.toSafeText(vulnerability.sourceUrl, '')
@@ -271,6 +291,18 @@ export class ComponentDetailsRenderer extends Component {
 
     if (vulnerability.source) {
       lines.push(`- **Source:** ${this.escapeMd(this.toSafeText(vulnerability.source, ''))}`);
+    }
+
+    if ('severitySource' in vulnerability && vulnerability.severitySource) {
+      lines.push(`- **Severity Source:** ${this.escapeMd(this.toSafeText(vulnerability.severitySource, ''))}`);
+    }
+
+    if ('severityMethod' in vulnerability && vulnerability.severityMethod) {
+      lines.push(`- **Severity Method:** ${this.escapeMd(this.toSafeText(vulnerability.severityMethod, ''))}`);
+    }
+
+    if ('severityVector' in vulnerability && vulnerability.severityVector) {
+      lines.push(`- **Vector:** \`${this.escapeInlineCode(this.toSafeText(vulnerability.severityVector, ''))}\``);
     }
 
     if ('refs' in vulnerability && vulnerability.refs) {

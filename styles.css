@@ -223,7 +223,6 @@
 /* ==========================================================================
    5. ROW BOUNDARIES, EXPAND STATES & MARKDOWN
    ========================================================================== */
-/* --- ROW BOUNDARIES & HOVER STATES --- */
 .vulndash-item-boundary td {
   border-top: 1px solid var(--background-modifier-border);
 }
@@ -241,7 +240,8 @@
   background-color: var(--background-secondary);
 }
 
-.vulndash-row-details td {
+.vulndash-row-details td,
+.vulndash-component-details-host {
   padding: 1rem 1.5rem;
   border-bottom: 2px solid var(--background-modifier-border);
 }
@@ -251,7 +251,6 @@
   font-family: var(--font-monospace);
   margin-right: 6px;
   display: inline-block;
-  width: 1.2em;
 }
 
 .vulndash-summary,
@@ -267,7 +266,6 @@
   margin-bottom: 0.65rem;
 }
 
-/* --- MARKDOWN CODE BLOCK FIXES --- */
 .vulndash-summary pre {
   background-color: var(--background-secondary-alt);
   border: 1px solid var(--background-modifier-border);
@@ -294,26 +292,6 @@
   margin: 0.5rem 0;
   display: block;
 }
-
-/* Column Widths for 9-column layout */
-.vulndash-table th:nth-child(1),
-.vulndash-table td:nth-child(1) { width: 18%; } /* ID */
-
-.vulndash-table th:nth-child(2),
-.vulndash-table td:nth-child(2) { width: 42%; } /* Title */
-
-.vulndash-table th:nth-child(3),
-.vulndash-table td:nth-child(3) { width: 10%; } /* Source */
-
-.vulndash-table th:nth-child(4),
-.vulndash-table td:nth-child(4) { width: 10%; } /* Severity */
-
-.vulndash-table th:nth-child(5),
-.vulndash-table td:nth-child(5) { width: 5%; } /* CVSS */
-
-.vulndash-table th:nth-child(6),
-.vulndash-table td:nth-child(6) { width: 15%; } /* Published */
-
 
 @media (max-width: 900px) {
   .vulndash-view {
@@ -345,16 +323,6 @@
   .vulndash-date-range-custom {
     display: grid;
     grid-template-columns: 1fr;
-  }
-
-  .vulndash-table {
-    min-width: 1100px;
-    font-size: var(--font-ui-smaller);
-  }
-
-  .vulndash-table thead th,
-  .vulndash-table tbody td {
-    padding: var(--size-4-1) var(--size-4-2);
   }
 }
 
@@ -940,59 +908,44 @@
 }
 
 .vulndash-component-table-shell {
-  overflow-x: auto;
+  overflow: hidden;
+}
+
+.vulndash-component-table-viewport {
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .vulndash-component-table {
   width: 100%;
+  min-width: 1100px;
   border-collapse: separate;
   border-spacing: 0;
-}
-
-.vulndash-component-table th,
-.vulndash-component-table td {
-  padding: 0.85rem 0.9rem;
-  border-top: 1px solid var(--background-modifier-border);
-  vertical-align: top;
-  user-select: text;
-  text-align: left; /* Aligns headers with the data columns */
+  table-layout: fixed;
 }
 
 .vulndash-component-table thead th {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: color-mix(in srgb, var(--background-primary) 94%, transparent);
-  border-top: none;
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  justify-content: left;
+  background: var(--background-secondary);
 }
 
-/* Column widths for the component inventory table */
-.vulndash-component-table th:nth-child(1),
-.vulndash-component-table td:nth-child(1) { width: 14%; } /* Project */
+.vulndash-component-table td {
+  border-top: 1px solid var(--background-modifier-border);
+  padding: 0.85rem 0.9rem;
+  vertical-align: top;
+}
 
-.vulndash-component-table th:nth-child(2),
-.vulndash-component-table td:nth-child(2) { width: 16%; } /* SBOM file */
+.vulndash-component-table-row:hover > td {
+  background: color-mix(in srgb, var(--background-modifier-hover) 78%, var(--background-primary));
+}
 
-.vulndash-component-table th:nth-child(3),
-.vulndash-component-table td:nth-child(3) { width: 24%; } /* Component */
-
-.vulndash-component-table th:nth-child(4),
-.vulndash-component-table td:nth-child(4) { width: 10%; } /* Version */
-
-.vulndash-component-table th:nth-child(5),
-.vulndash-component-table td:nth-child(5) { width: 20%; } /* Identifier */
-
-.vulndash-component-table th:nth-child(6),
-.vulndash-component-table td:nth-child(6) { width: 8%; } /* Vulnerabilities */
-
-.vulndash-component-table th:nth-child(7),
-.vulndash-component-table td:nth-child(7) { width: 18%; } /* Actions */
-
+.vulndash-component-details-row > td {
+  padding: 0;
+  background: var(--background-secondary);
+}
 
 .vulndash-component-row.is-followed {
   background: color-mix(in srgb, var(--color-green, #22c55e) 6%, transparent);
@@ -1006,8 +959,8 @@
   box-shadow: inset 3px 0 0 color-mix(in srgb, var(--text-warning) 75%, transparent);
 }
 
-.vulndash-component-row:hover td {
-  background: color-mix(in srgb, var(--background-modifier-hover) 78%, var(--background-primary));
+.vulndash-component-row.is-selected > td {
+  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
 }
 
 .vulndash-component-name-stack,
@@ -1139,8 +1092,10 @@
   border-color: var(--background-modifier-border);
 }
 
-.vulndash-component-details-row td {
-  background: color-mix(in srgb, var(--background-secondary) 92%, transparent);
+.vulndash-severity-pill.is-unknown {
+  color: var(--text-normal);
+  background: color-mix(in srgb, var(--color-cyan, #06b6d4) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-cyan, #06b6d4) 22%, transparent);
 }
 
 .vulndash-component-detail-panel {
@@ -1364,7 +1319,6 @@
 /* ==========================================================================
    11. COMPONENT DETAILS & TEXT FORMATTING
    ========================================================================== */
-/* --- Added .vulndash-component-details changes --- */
 .vulndash-component-details,
 .vulndash-component-details-host {
   padding: 0.75rem 1rem;
@@ -1404,3 +1358,96 @@
 .vulndash-component-details a.internal-link {
   word-break: break-word;
 }
+
+/* ==========================================================================
+   12. VIRTUALIZATION ENGINE STRUCTURAL CONSTRAINTS
+   ========================================================================== */
+.vulndash-virtual-viewport-host {
+  overflow-y: auto;
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.vulndash-virtual-content {
+  position: relative;
+}
+
+.vulndash-virtual-row-container {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.vulndash-virtual-table-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ==========================================================================
+   13. VIRTUAL TABLE LAYOUT (FLEXBOX COLUMNS)
+   ========================================================================== */
+/* Force the virtual rows to act like table rows */
+.vulndash-virtual-header,
+.vulndash-virtual-row {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* Force the virtual columns to act like table cells */
+.vulndash-col-header,
+.vulndash-col {
+  padding: 0.85rem 0.9rem;
+  box-sizing: border-box;
+  overflow: hidden;
+  word-wrap: break-word;
+}
+
+.vulndash-col-header {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+}
+
+/* COMPONENT INVENTORY TABLE WIDTHS */
+/* COMPONENT INVENTORY TABLE WIDTHS (Exactly 100%) */
+.vulndash-component-table .vulndash-component-col-project { width: 8%; } /* Project */
+
+.vulndash-component-table .vulndash-component-col-sbom { width: 14%; } /* SBOM File */
+
+.vulndash-component-table .vulndash-component-col-name { width: 20%; } /* Component */
+
+.vulndash-component-table .vulndash-component-col-version { width: 12%; } /* Version */
+
+.vulndash-component-table .vulndash-component-col-identifier { width: 25%; } /* PURL */
+
+.vulndash-component-table .vulndash-component-col-vulnerabilities { width: 5%; }  /* Vulnerabilities */
+
+.vulndash-component-table .vulndash-component-col-actions { width: 16%; } /* Actions */
+
+
+/* VULNERABILITY TABLE WIDTHS */
+.vulndash-virtual-table-root .vulndash-col-header:nth-child(1),
+.vulndash-virtual-table-root .vulndash-col-id { flex: 0 0 18%; }
+
+.vulndash-virtual-table-root .vulndash-col-header:nth-child(2),
+.vulndash-virtual-table-root .vulndash-col-title { flex: 0 0 42%; }
+
+.vulndash-virtual-table-root .vulndash-col-header:nth-child(3),
+.vulndash-virtual-table-root .vulndash-col-source { flex: 0 0 10%; }
+
+.vulndash-virtual-table-root .vulndash-col-header:nth-child(4),
+.vulndash-virtual-table-root .vulndash-col-severity { flex: 0 0 10%; }
+
+.vulndash-virtual-table-root .vulndash-col-header:nth-child(5),
+.vulndash-virtual-table-root .vulndash-col-cvssScore { flex: 0 0 5%; }
+
+.vulndash-virtual-table-root .vulndash-col-header:nth-child(6),
+.vulndash-virtual-table-root .vulndash-col-publishedAt { flex: 0 0 15%; }

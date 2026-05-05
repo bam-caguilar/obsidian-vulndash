@@ -1,17 +1,20 @@
-import type {
-  NormalizedSbomFormat,
-  NormalizedSeverity
-} from '../../domain/sbom/types';
-import { getHighestSeverity, getSeverityRank } from '../../domain/value-objects/Severity';
+import type { NormalizedSbomFormat } from '../../../domain/sbom/types';
+import type { SeverityRating } from '../../../domain/vulnerabilities/SeverityRating';
 import type {
   ComponentPurlMatchSummary,
   ComponentInventoryWorkspaceSnapshot,
   RelatedVulnerabilitySummary,
   TrackedComponent,
   TrackedComponentSource
-} from '../../application/sbom/types';
+} from '../../../application/sbom/types';
+import {
+  getHighestDisplaySeverity,
+  matchesDisplaySeverityFilter,
+  resolveDisplaySeverity,
+  type DisplaySeverity
+} from '../../rendering/SeverityBadgeRenderer';
 
-export type ComponentSeverityFilter = 'any' | NormalizedSeverity;
+export type ComponentSeverityFilter = 'any' | 'critical' | 'high' | 'medium' | 'low' | 'unknown';
 
 export interface ComponentInventoryFilters {
   enabledOnly: boolean;
@@ -43,8 +46,9 @@ export interface ComponentInventoryDerivedState {
 }
 
 export interface ComponentInventoryDisplayEntry {
+  allSeverities: readonly SeverityRating[];
   component: TrackedComponent;
-  highestSeverity: NormalizedSeverity | undefined;
+  highestSeverity: DisplaySeverity | undefined;
   relatedVulnerabilities: readonly RelatedVulnerabilitySummary[];
   visibleSources: readonly TrackedComponentSource[];
   vulnerabilityCount: number;
@@ -52,26 +56,6 @@ export interface ComponentInventoryDisplayEntry {
 
 const normalizeToken = (value: string): string =>
   value.trim().replace(/\s+/g, ' ').toLowerCase();
-
-const severityFromRelatedVulnerability = (
-  vulnerability: RelatedVulnerabilitySummary
-): NormalizedSeverity | undefined => {
-  switch (normalizeToken(vulnerability.severity)) {
-    case 'critical':
-      return 'critical';
-    case 'high':
-      return 'high';
-    case 'medium':
-      return 'medium';
-    case 'low':
-      return 'low';
-    case 'informational':
-    case 'info':
-      return 'informational';
-    default:
-      return undefined;
-  }
-};
 
 const getUniqueVulnerabilityCount = (
   vulnerabilityIds: readonly string[],
@@ -91,12 +75,13 @@ const getUniqueVulnerabilityCount = (
 };
 
 const getEffectiveHighestSeverity = (
-  severities: ReadonlyArray<NormalizedSeverity | undefined>,
+  severities: ReadonlyArray<DisplaySeverity | undefined>,
   relatedVulnerabilities: readonly RelatedVulnerabilitySummary[]
-): NormalizedSeverity | undefined =>
-  getHighestSeverity([
+): DisplaySeverity | undefined =>
+  getHighestDisplaySeverity([
     ...severities,
-    ...relatedVulnerabilities.map((vulnerability) => severityFromRelatedVulnerability(vulnerability))
+    ...relatedVulnerabilities.map((vulnerability) =>
+      resolveDisplaySeverity(vulnerability.normalizedSeverity, vulnerability.severity))
   ]);
 
 const matchesSourceScope = (
@@ -197,11 +182,25 @@ const toDisplayEntry = (
   const embeddedVulnerabilities = getScopedEmbeddedVulnerabilities(component, visibleSources);
   const relatedVulnerabilities = getScopedRelatedVulnerabilities(snapshot, component, visibleSources);
 
+  const graphSeverities = snapshot.relationships.allSeveritiesByComponent.get(component.key) ?? [];
+  const embeddedSeverities: SeverityRating[] = embeddedVulnerabilities
+    .map((vulnerability) => {
+      if (vulnerability.normalizedSeverity?.rating) {
+        return vulnerability.normalizedSeverity.rating;
+      }
+      const display = resolveDisplaySeverity(undefined, vulnerability.severity);
+      return display as SeverityRating | undefined;
+    })
+    .filter((r): r is SeverityRating => r !== undefined);
+  const allSeverities = Array.from(new Set([...graphSeverities, ...embeddedSeverities]));
+
   return {
+    allSeverities,
     component,
     highestSeverity: getEffectiveHighestSeverity(
       [
-        ...embeddedVulnerabilities.map((vulnerability) => vulnerability.severity),
+        ...embeddedVulnerabilities.map((vulnerability) =>
+          resolveDisplaySeverity(vulnerability.normalizedSeverity, vulnerability.severity)),
         visibleSources.length === component.sources.length ? component.highestSeverity : undefined
       ],
       relatedVulnerabilities
@@ -251,12 +250,8 @@ const matchesSeverityThreshold = (
     return true;
   }
 
-  const highestSeverity = entry.highestSeverity;
-  if (!highestSeverity) {
-    return false;
-  }
-
-  return getSeverityRank(highestSeverity) >= getSeverityRank(threshold);
+  return entry.allSeverities.includes(threshold as SeverityRating)
+    || matchesDisplaySeverityFilter(entry.highestSeverity, threshold);
 };
 
 export const createDefaultComponentInventoryFilters = (): ComponentInventoryFilters => ({

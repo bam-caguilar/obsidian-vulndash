@@ -108,6 +108,7 @@ test('buildComponentRelationshipGraphFromCache always uses cached vulnerabilitie
   let capturedVulnerabilities: readonly Vulnerability[] | null = null;
 
   const graph: ComponentRelationshipGraph = {
+    allSeveritiesByComponent: new Map(),
     componentsByVulnerability: new Map(),
     relationships: [],
     vulnerabilitiesByComponent: new Map(),
@@ -152,6 +153,7 @@ test('buildComponentRelationshipGraphFromCache forwards purl query cache matches
     buildGraph: (_receivedComponents, _receivedOccurrences, _receivedVulnerabilities, options) => {
       capturedOptions = options;
       return {
+        allSeveritiesByComponent: new Map(),
         componentsByVulnerability: new Map(),
         relationships: [],
         vulnerabilitiesByComponent: new Map(),

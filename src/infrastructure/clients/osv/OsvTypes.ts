@@ -15,8 +15,14 @@ export interface OsvBatchRequest {
   readonly queries: readonly OsvBatchQueryItem[];
 }
 
+export type OsvSeverityType =
+  | 'CVSS_V2'
+  | 'CVSS_V3'
+  | 'CVSS_V4'
+  | (string & {});
+
 export interface OsvSeverityPayload {
-  readonly type: string;
+  readonly type: OsvSeverityType;
   readonly score: string;
 }
 
