@@ -716,8 +716,11 @@ export class ComponentInventoryView {
       this.setRegionVisible(this.stateHostEl, false);
       return;
     }
-
-    this.setRegionVisible(this.stateHostEl, true);
+    // Always show the state region if we're rendering a card, even if it's
+    // empty, to preserve layout and provide a consistent location for transient
+    // messages like loading, syncing, and error states during refreshes.
+    // this.setRegionVisible(this.stateHostEl, true);
+    this.setRegionVisible(this.stateHostEl, false);
     const state = this.stateHostEl.createDiv({
       cls: `vulndash-empty-state vulndash-component-state${copy.tone === 'error' ? ' is-error' : ''}`
     });

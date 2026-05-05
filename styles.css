@@ -1286,34 +1286,39 @@
 }
 
 .vulndash-triage-state-active {
-  background: rgba(180, 73, 65, 0.14);
-  border-color: rgba(180, 73, 65, 0.35);
-  color: #8b2f2b;
+  background: #4a1f1c;
+  border-color: #dc827b;
+  color: #ffd8d5;
+  font-weight: 600;
 }
 
 .vulndash-triage-state-investigating {
-  background: rgba(198, 124, 23, 0.16);
-  border-color: rgba(198, 124, 23, 0.38);
-  color: #8a4b06;
+  background: #4a300e;
+  border-color: #e2a94d;
+  color: #ffe1ad;
+  font-weight: 600;
 }
 
 .vulndash-triage-state-accepted_risk {
-  background: rgba(90, 93, 183, 0.15);
-  border-color: rgba(90, 93, 183, 0.32);
-  color: #34389d;
+  background: #292b63;
+  border-color: #9ea2ff;
+  color: #e2e4ff;
+  font-weight: 600;
 }
 
 .vulndash-triage-state-mitigated {
-  background: rgba(47, 128, 90, 0.15);
-  border-color: rgba(47, 128, 90, 0.34);
-  color: #256246;
+  background: #173d2b;
+  border-color: #7fcba4;
+  color: #d8f5e6;
+  font-weight: 600;
 }
 
 .vulndash-triage-state-false_positive,
 .vulndash-triage-state-suppressed {
-  background: rgba(89, 97, 112, 0.15);
-  border-color: rgba(89, 97, 112, 0.3);
-  color: #4d5563;
+  background: #29303a;
+  border-color: #9aa3b2;
+  color: #eef2f7;
+  font-weight: 600;
 }
 
 /* ==========================================================================
