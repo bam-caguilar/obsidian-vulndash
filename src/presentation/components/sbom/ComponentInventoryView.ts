@@ -11,7 +11,10 @@ import {
   deriveComponentInventoryState
 } from './ComponentInventoryStore';
 import type { ComponentDetailsRenderer } from './ComponentDetailPanel';
-import { VirtualizedComponentTable } from './VirtualizedComponentTable';
+import {
+  ComponentTableRenderer,
+  type ComponentTableRowModel
+} from './ComponentTableRenderer';
 
 export interface ComponentInventoryViewCallbacks {
   detailsRenderer: ComponentDetailsRenderer;
@@ -55,12 +58,30 @@ export class ComponentInventoryView {
   private stateHostEl: HTMLDivElement | null = null;
   private summaryHostEl: HTMLDivElement | null = null;
   private tableHostEl: HTMLDivElement | null = null;
-  private tableShellEl: HTMLDivElement | null = null;
-  private virtualTable: VirtualizedComponentTable | null = null;
+  private readonly tableRenderer: ComponentTableRenderer;
 
   public constructor(
     private readonly callbacks: ComponentInventoryViewCallbacks
-  ) {}
+  ) {
+    this.tableRenderer = new ComponentTableRenderer({
+      detailsRenderer: this.callbacks.detailsRenderer,
+      onDisableComponent: (componentKey) => this.handlePreferenceAction(componentKey, 'disable'),
+      onEnableComponent: (componentKey) => this.handlePreferenceAction(componentKey, 'enable'),
+      onFollowComponent: (componentKey) => this.handlePreferenceAction(componentKey, 'follow'),
+      onToggleExpanded: (key, expanded) => {
+        if (expanded) {
+          this.expandedKeys.add(key);
+        } else {
+          this.expandedKeys.delete(key);
+        }
+        this.renderResults();
+      },
+      onUnfollowComponent: (componentKey) => this.handlePreferenceAction(componentKey, 'unfollow'),
+      ...(this.callbacks.onOpenNote !== undefined
+        ? { onOpenNote: this.callbacks.onOpenNote }
+        : {})
+    });
+  }
 
   public mount(containerEl: HTMLElement): void {
     if (this.rootEl) {
@@ -74,10 +95,8 @@ export class ComponentInventoryView {
     this.stateHostEl = this.resultsHostEl.createDiv({ cls: 'vulndash-component-state-region' });
     this.issuesHostEl = this.resultsHostEl.createDiv({ cls: 'vulndash-component-issues-region' });
     this.tableHostEl = this.resultsHostEl.createDiv({ cls: 'vulndash-component-table-region' });
-    this.tableShellEl = this.tableHostEl.createDiv({
-      cls: 'vulndash-component-table-shell vulndash-card-shell vulndash-virtual-table-root'
-    });
     this.diagnosticsHostEl = this.resultsHostEl.createDiv({ cls: 'vulndash-component-diagnostics-region' });
+    this.tableRenderer.mount(this.tableHostEl);
 
     this.setRegionVisible(this.stateHostEl, false);
     this.setRegionVisible(this.issuesHostEl, false);
@@ -110,8 +129,7 @@ export class ComponentInventoryView {
   }
 
   public destroy(): void {
-    this.virtualTable?.destroy();
-    this.virtualTable = null;
+    this.tableRenderer.destroy();
     this.lastReadySnapshot = null;
     this.rootEl?.remove();
     this.rootEl = null;
@@ -121,7 +139,6 @@ export class ComponentInventoryView {
     this.stateHostEl = null;
     this.issuesHostEl = null;
     this.tableHostEl = null;
-    this.tableShellEl = null;
     this.diagnosticsHostEl = null;
   }
 
@@ -293,7 +310,7 @@ export class ComponentInventoryView {
     const transientState = this.getTransientStateCard();
     this.renderStateCard(transientState);
     this.renderIssues(inventory.issues.length > 0 ? inventory : null);
-    this.renderTable(derivedState.components);
+    this.renderTable(this.buildTableRowModels(derivedState.components));
     this.renderPurlDiagnostics(derivedState.purlMatches);
   }
 
@@ -411,44 +428,18 @@ export class ComponentInventoryView {
     }
   }
 
-  private renderTable(components: readonly ComponentInventoryDisplayEntry[]): void {
-    if (!this.tableHostEl || !this.tableShellEl) {
+  private renderTable(rows: readonly ComponentTableRowModel[]): void {
+    if (!this.tableHostEl) {
       return;
     }
 
-    if (!this.virtualTable) {
-      this.virtualTable = new VirtualizedComponentTable({
-        detailsRenderer: this.callbacks.detailsRenderer,
-        isExpanded: (key) => this.expandedKeys.has(key),
-        onDisable: (component) => this.handlePreferenceAction(component.key, 'disable'),
-        onEnable: (component) => this.handlePreferenceAction(component.key, 'enable'),
-        onFollow: (component) => this.handlePreferenceAction(component.key, 'follow'),
-        onToggleExpanded: (key, expanded) => {
-          if (expanded) {
-            this.expandedKeys.add(key);
-          } else {
-            this.expandedKeys.delete(key);
-          }
-          this.renderResults();
-        },
-        onUnfollow: (component) => this.handlePreferenceAction(component.key, 'unfollow'),
-        ...(this.callbacks.onOpenNote !== undefined
-          ? { onOpenNote: this.callbacks.onOpenNote }
-          : {})
-      });
-    }
-
-    if (this.virtualTable.container.parentElement !== this.tableShellEl) {
-      this.tableShellEl.appendChild(this.virtualTable.container);
-    }
-
-    if (components.length === 0) {
+    if (rows.length === 0) {
       this.setRegionVisible(this.tableHostEl, false);
       return;
     }
 
     this.setRegionVisible(this.tableHostEl, true);
-    this.virtualTable.updateData([...components]);
+    this.tableRenderer.render(rows);
   }
 
   private renderPurlDiagnostics(
@@ -705,4 +696,75 @@ export class ComponentInventoryView {
 
     element.style.display = visible ? '' : 'none';
   }
+
+  private buildTableRowModels(
+    components: readonly ComponentInventoryDisplayEntry[]
+  ): readonly ComponentTableRowModel[] {
+    return components.map((entry) => this.toTableRowModel(entry));
+  }
+
+  private toTableRowModel(
+    entry: ComponentInventoryDisplayEntry
+  ): ComponentTableRowModel {
+    const projectNames = uniqueNonEmptyValues(entry.visibleSources.map((source) => source.projectName));
+    const sbomNames = uniqueNonEmptyValues(entry.visibleSources.map((source) => source.sbomFileName));
+    const projectLabel = projectNames[0] ?? 'Unassigned Project';
+    const sbomLabel = sbomNames[0] ?? 'Unknown SBOM';
+    const projectCaption = projectNames.length > 1
+      ? `${projectNames.length} projects in scope`
+      : undefined;
+    const sbomCaption = sbomNames.length > 1
+      ? `${sbomNames.length} SBOM files in scope`
+      : undefined;
+    const supplierLabel = entry.component.supplier?.trim() || 'Unknown supplier';
+    const versionLabel = entry.component.version?.trim() || 'No version';
+    const identifierLabel = entry.component.purl?.trim()
+      || entry.component.cpe?.trim()
+      || 'None';
+
+    return {
+      component: entry.component,
+      componentName: entry.component.name,
+      highestSeverity: entry.highestSeverity,
+      identifierLabel,
+      isExpanded: this.expandedKeys.has(entry.component.key),
+      key: entry.component.key,
+      ...(projectCaption ? { projectCaption } : {}),
+      projectLabel,
+      relatedVulnerabilities: entry.relatedVulnerabilities,
+      rowStateHash: [
+        entry.component.key,
+        projectLabel,
+        projectCaption ?? '',
+        sbomLabel,
+        sbomCaption ?? '',
+        entry.component.name,
+        supplierLabel,
+        versionLabel,
+        identifierLabel,
+        String(entry.vulnerabilityCount),
+        entry.highestSeverity ?? '',
+        entry.component.isEnabled ? 'enabled' : 'disabled',
+        entry.component.isFollowed ? 'followed' : 'unfollowed',
+        this.expandedKeys.has(entry.component.key) ? 'expanded' : 'collapsed',
+        entry.component.formats.join(','),
+        entry.relatedVulnerabilities
+          .map((vulnerability) => `${vulnerability.source}:${vulnerability.id}`)
+          .sort((left, right) => left.localeCompare(right))
+          .join('|')
+      ].join('::'),
+      ...(sbomCaption ? { sbomCaption } : {}),
+      sbomLabel,
+      supplierLabel,
+      versionLabel,
+      vulnerabilityCount: entry.vulnerabilityCount
+    };
+  }
 }
+
+const uniqueNonEmptyValues = (
+  values: ReadonlyArray<string | undefined>
+): string[] =>
+  Array.from(new Set(values
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))));
