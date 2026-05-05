@@ -8,7 +8,10 @@ import type {
   VulnerabilitySourceUrls
 } from '../../../domain/entities/Vulnerability';
 import { filterVulnerabilitiesByDateWindow } from '../../../application/dashboard/PublishedDateWindow';
-import { classifySeverity } from '../../../domain/value-objects/CvssScore';
+import {
+  createVulnerabilitySeverityPolicy,
+  type VulnerabilitySeverityPolicy
+} from '../../../domain/vulnerabilities/VulnerabilitySeverityPolicy';
 import { sanitizeMarkdown, sanitizeText, sanitizeUrl } from '../../security/sanitize';
 import { ClientBase, type FeedSyncControls } from '../common/ClientBase';
 
@@ -40,16 +43,6 @@ export type GitHubAdvisoryItem = {
 type GitHubSecurityResponse = GitHubAdvisoryItem[] | { items?: GitHubAdvisoryItem[] };
 const GITHUB_ADVISORIES_ENDPOINT = 'https://api.github.com/advisories';
 const GITHUB_API_VERSION = '2022-11-28';
-
-const severityToScore = (severity: string | undefined): number => {
-  switch (severity) {
-    case 'critical': return 9.5;
-    case 'high': return 8.0;
-    case 'moderate': return 5.5;
-    case 'low': return 2.5;
-    default: return 0;
-  }
-};
 
 const uniqueNonEmpty = (values: string[]): string[] => {
   const seen = new Set<string>();
@@ -93,6 +86,8 @@ export const extractNextLink = (linkHeader: string | undefined): string | undefi
 };
 
 export class GitHubAdvisoryClient extends ClientBase implements VulnerabilityFeed {
+  private readonly severityPolicy: VulnerabilitySeverityPolicy;
+
   public constructor(
     httpClient: IHttpClient,
     public readonly id: string,
@@ -101,6 +96,7 @@ export class GitHubAdvisoryClient extends ClientBase implements VulnerabilityFee
     private readonly controls: FeedSyncControls
   ) {
     super(httpClient, name, controls);
+    this.severityPolicy = createVulnerabilitySeverityPolicy();
   }
 
   public async fetchVulnerabilities(options: FetchVulnerabilityOptions): Promise<FetchVulnerabilityResult> {
@@ -238,7 +234,12 @@ export class GitHubAdvisoryClient extends ClientBase implements VulnerabilityFee
   }
 
   protected normalize(advisory: GitHubAdvisoryItem, sourceLabel: string): Vulnerability {
-    const score = advisory.cvss?.score ?? severityToScore(advisory.severity);
+    const resolvedSeverity = this.severityPolicy.resolve({
+      fallbackSource: 'unknown',
+      method: 'GHSA',
+      ...(advisory.cvss?.score !== undefined ? { score: advisory.cvss.score } : {}),
+      ...(advisory.severity ? { severity: advisory.severity } : {})
+    });
     const summary = advisory.description ?? advisory.summary ?? 'No summary provided';
     const publishedAt = advisory.published_at ?? new Date(0).toISOString();
     const updatedAt = advisory.updated_at ?? publishedAt;
@@ -326,8 +327,9 @@ export class GitHubAdvisoryClient extends ClientBase implements VulnerabilityFee
       summary: sanitizeMarkdown(summary),
       publishedAt,
       updatedAt,
-      cvssScore: score,
-      severity: classifySeverity(score),
+      cvssScore: resolvedSeverity.score ?? 0,
+      normalizedSeverity: resolvedSeverity.normalizedSeverity,
+      severity: resolvedSeverity.severity,
       references,
       affectedProducts: packages,
       ...(Object.keys(metadata).length > 0 ? { metadata } : {})
