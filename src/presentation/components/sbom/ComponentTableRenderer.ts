@@ -41,6 +41,16 @@ export interface ComponentTableRendererCallbacks {
   readonly onOpenNote?: (notePath: string) => void;
 }
 
+export interface ComponentTableRenderMetrics {
+  readonly createdRows: number;
+  readonly movedRows: number;
+  readonly patchedRows: number;
+  readonly removedRows: number;
+  readonly renderDurationMs: number;
+  readonly totalRows: number;
+  readonly unchangedRows: number;
+}
+
 const HEADER_LABELS = [
   'Project',
   'SBOM File',
@@ -89,6 +99,7 @@ export class ComponentTableRenderer {
   private shellEl: HTMLDivElement | null = null;
   private tableEl: HTMLTableElement | null = null;
   private viewportEl: HTMLDivElement | null = null;
+  private lastRenderMetrics: ComponentTableRenderMetrics | null = null;
 
   public constructor(
     private readonly callbacks: ComponentTableRendererCallbacks
@@ -100,6 +111,7 @@ export class ComponentTableRenderer {
   }
 
   public render(rows: readonly ComponentTableRowModel[]): void {
+    const renderStart = this.getTimestamp();
     this.ensureShell();
     if (!this.bodyEl || !this.viewportEl) {
       return;
@@ -167,6 +179,24 @@ export class ComponentTableRenderer {
 
     const maxScrollTop = Math.max(0, this.viewportEl.scrollHeight - this.viewportEl.clientHeight);
     this.viewportEl.scrollTop = Math.min(preservedScrollTop, maxScrollTop);
+
+    const unchangedRows = Math.max(
+      0,
+      nextRows.length
+      - patchPlan.createdKeys.length
+      - patchPlan.dirtyKeys.length
+      - patchPlan.movedKeys.length
+    );
+    this.lastRenderMetrics = {
+      createdRows: patchPlan.createdKeys.length,
+      movedRows: patchPlan.movedKeys.length,
+      patchedRows: patchPlan.dirtyKeys.length,
+      removedRows: patchPlan.deletedKeys.length,
+      renderDurationMs: Number((this.getTimestamp() - renderStart).toFixed(2)),
+      totalRows: nextRows.length,
+      unchangedRows
+    };
+    this.logRenderMetrics(this.lastRenderMetrics);
   }
 
   public destroy(): void {
@@ -177,10 +207,15 @@ export class ComponentTableRenderer {
     this.viewportEl = null;
     this.rowElements.clear();
     this.rowHashes.clear();
+    this.lastRenderMetrics = null;
     this.shellEl?.remove();
     this.shellEl = null;
     this.tableEl = null;
     this.hostEl = null;
+  }
+
+  public getLastRenderMetrics(): ComponentTableRenderMetrics | null {
+    return this.lastRenderMetrics;
   }
 
   private ensureShell(): void {
@@ -558,5 +593,15 @@ export class ComponentTableRenderer {
     }
 
     this.callbacks.onSelectComponent(componentKey);
+  }
+
+  private getTimestamp(): number {
+    return typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+  }
+
+  private logRenderMetrics(metrics: ComponentTableRenderMetrics): void {
+    console.info('[vulndash.component_inventory.render]', metrics);
   }
 }
