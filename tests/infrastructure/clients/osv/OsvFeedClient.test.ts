@@ -147,6 +147,7 @@ const createVulnerabilityPayload = (
 const createDomainVulnerability = (id: string, source = 'OSV'): Vulnerability => ({
   affectedProducts: ['@example/widget'],
   cvssScore: 7.5,
+  hydrationState: 'complete',
   id,
   publishedAt: '2026-04-21T00:00:00.000Z',
   references: [`https://osv.dev/vulnerability/${id}`],

@@ -1,6 +1,6 @@
 import type { FeedConfig } from '../../application/use-cases/types';
 import { BUILT_IN_FEEDS } from '../../domain/feeds/FeedTypes';
-import type { Vulnerability } from '../../domain/entities/Vulnerability';
+import type { VulnerabilityInput } from '../../domain/entities/Vulnerability';
 import { SyncMetadataRepository } from './SyncMetadataRepository';
 import { VulnCacheRepository } from './VulnCacheRepository';
 
@@ -23,7 +23,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 
-const isVulnerability = (value: unknown): value is Vulnerability => {
+const isVulnerability = (value: unknown): value is VulnerabilityInput => {
   if (!isRecord(value)) {
     return false;
   }
@@ -40,7 +40,7 @@ const isVulnerability = (value: unknown): value is Vulnerability => {
     && isStringArray(value.affectedProducts);
 };
 
-const collectLegacyVulnerabilities = (data: LegacyPersistedPluginData | null): Vulnerability[] => {
+const collectLegacyVulnerabilities = (data: LegacyPersistedPluginData | null): VulnerabilityInput[] => {
   if (!data) {
     return [];
   }
@@ -99,7 +99,7 @@ export class LegacyDataMigration {
     }
 
     const legacyVulnerabilities = collectLegacyVulnerabilities(data);
-    const groupedBySource = new Map<string, Vulnerability[]>();
+    const groupedBySource = new Map<string, VulnerabilityInput[]>();
     for (const vulnerability of legacyVulnerabilities) {
       const sourceId = resolveLegacySourceId(vulnerability.source, feeds);
       const current = groupedBySource.get(sourceId) ?? [];

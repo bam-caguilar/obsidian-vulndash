@@ -1,6 +1,6 @@
 import { buildVulnerabilityCacheKey } from '../../application/pipeline/PipelineTypes';
 import type { PipelineSnapshot } from '../../application/pipeline/PipelineTypes';
-import type { Vulnerability } from '../../domain/entities/Vulnerability';
+import type { Vulnerability, VulnerabilityInput } from '../../domain/entities/Vulnerability';
 import { normalizeVulnerabilitySeverity } from '../../domain/vulnerabilities/normalizeVulnerabilitySeverity';
 import type { IOsvQueryCache } from '../clients/osv/IOsvQueryCache';
 import { awaitTransaction, VulnCacheDb } from './VulnCacheDb';
@@ -104,7 +104,7 @@ export class VulnCacheRepository implements IOsvQueryCache {
 
   public async replaceSourceSnapshot(
     sourceId: string,
-    vulnerabilities: readonly Vulnerability[],
+    vulnerabilities: readonly VulnerabilityInput[],
     syncedAt: string
   ): Promise<void> {
     const db = await this.database.open();
@@ -138,7 +138,7 @@ export class VulnCacheRepository implements IOsvQueryCache {
 
   public async importLegacySnapshot(
     sourceId: string,
-    vulnerabilities: readonly Vulnerability[],
+    vulnerabilities: readonly VulnerabilityInput[],
     lastSeenAt: string
   ): Promise<void> {
     const db = await this.database.open();
@@ -364,7 +364,7 @@ export class VulnCacheRepository implements IOsvQueryCache {
     return values;
   }
 
-  private normalizeLoadedVulnerability(vulnerability: Vulnerability): Vulnerability {
+  private normalizeLoadedVulnerability(vulnerability: VulnerabilityInput): Vulnerability {
     return normalizeVulnerabilitySeverity(vulnerability);
   }
 
@@ -375,7 +375,7 @@ export class VulnCacheRepository implements IOsvQueryCache {
     };
   }
 
-  private normalizePersistedVulnerability(vulnerability: Vulnerability): Vulnerability {
+  private normalizePersistedVulnerability(vulnerability: VulnerabilityInput): Vulnerability {
     return this.normalizeLoadedVulnerability(vulnerability);
   }
 

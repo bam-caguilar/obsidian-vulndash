@@ -24,7 +24,7 @@ test('advances cursor only on successful source sync', async () => {
         vulnerabilities: [{
           id: 'GHSA-1', source: 'GitHub', title: 'one', summary: 'one',
           publishedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z',
-          cvssScore: 8, severity: 'HIGH', references: [], affectedProducts: []
+          cvssScore: 8, hydrationState: 'complete', severity: 'HIGH', references: [], affectedProducts: []
         }],
         pagesFetched: 1,
         warnings: [],
@@ -61,12 +61,12 @@ test('idempotent merge keeps newest record', async () => {
           {
             id: 'GHSA-1', source: 'GitHub', title: 'old', summary: 'old',
             publishedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-            cvssScore: 5, severity: 'MEDIUM', references: [], affectedProducts: []
+            cvssScore: 5, hydrationState: 'complete', severity: 'MEDIUM', references: [], affectedProducts: []
           },
           {
             id: 'GHSA-1', source: 'GitHub', title: 'new', summary: 'new',
             publishedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-03T00:00:00.000Z',
-            cvssScore: 9, severity: 'CRITICAL', references: [], affectedProducts: []
+            cvssScore: 9, hydrationState: 'complete', severity: 'CRITICAL', references: [], affectedProducts: []
           }
         ],
         pagesFetched: 1,
@@ -117,7 +117,7 @@ test('mixed outcome reports GitHub failure while retaining successful NVD data',
         vulnerabilities: [{
           id: 'CVE-2026-0001', source: 'NVD', title: 'nvd item', summary: 'nvd item',
           publishedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-          cvssScore: 8, severity: 'HIGH', references: [], affectedProducts: []
+          cvssScore: 8, hydrationState: 'complete', severity: 'HIGH', references: [], affectedProducts: []
         }],
         pagesFetched: 1,
         warnings: [],

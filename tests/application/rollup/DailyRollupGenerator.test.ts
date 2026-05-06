@@ -72,6 +72,7 @@ const createFinding = (overrides: Partial<RollupFinding> = {}): RollupFinding =>
   vulnerability: {
     affectedProducts: [],
     cvssScore: 8.6,
+    hydrationState: 'complete',
     id: 'CVE-2026-4000',
     publishedAt: '2026-04-18T00:00:00.000Z',
     references: [],
@@ -267,6 +268,7 @@ test('DailyRollupGenerator filters findings for a single-project briefing before
       vulnerability: {
         affectedProducts: [],
         cvssScore: 9.1,
+        hydrationState: 'complete',
         id: 'CVE-2026-4001',
         publishedAt: '2026-04-18T00:00:00.000Z',
         references: [],
@@ -342,6 +344,7 @@ test('DailyRollupGenerator filters findings for a multi-project briefing before 
       vulnerability: {
         affectedProducts: [],
         cvssScore: 9.1,
+        hydrationState: 'complete',
         id: 'CVE-2026-4001',
         publishedAt: '2026-04-18T00:00:00.000Z',
         references: [],
@@ -362,6 +365,7 @@ test('DailyRollupGenerator filters findings for a multi-project briefing before 
       vulnerability: {
         affectedProducts: [],
         cvssScore: 7.5,
+        hydrationState: 'complete',
         id: 'GHSA-legacy-4002',
         publishedAt: '2026-04-18T00:00:00.000Z',
         references: [],

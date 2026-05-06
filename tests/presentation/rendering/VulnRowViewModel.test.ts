@@ -18,7 +18,8 @@ const createVulnerability = (overrides: Partial<Vulnerability> = {}): Vulnerabil
   source: 'NVD',
   summary: 'A test summary',
   title: 'Demo vulnerability',
-  ...overrides
+  ...overrides,
+  hydrationState: overrides.hydrationState ?? 'complete'
 });
 
 const createRelatedComponent = (overrides: Partial<RelatedComponentSummary> = {}): RelatedComponentSummary => ({

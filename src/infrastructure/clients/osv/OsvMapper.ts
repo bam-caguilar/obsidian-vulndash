@@ -12,6 +12,7 @@ import type {
   NormalizedSeverity,
   NormalizedSeveritySource
 } from '../../../domain/vulnerabilities/NormalizedSeverity';
+import { normalizeVulnerabilitySeverity } from '../../../domain/vulnerabilities/normalizeVulnerabilitySeverity';
 import {
   createVulnerabilitySeverityPolicy,
   type VulnerabilitySeverityPolicy
@@ -349,7 +350,7 @@ export class OsvMapper {
       metadata.sourceUrls = sourceUrls;
     }
 
-    return {
+    return normalizeVulnerabilitySeverity({
       id,
       source: this.sourceName,
       title,
@@ -362,7 +363,7 @@ export class OsvMapper {
       references,
       affectedProducts,
       ...(Object.keys(metadata).length > 0 ? { metadata } : {})
-    };
+    });
   }
 
   private resolveNormalizedSeverity(

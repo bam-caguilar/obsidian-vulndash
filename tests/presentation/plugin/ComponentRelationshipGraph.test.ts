@@ -89,6 +89,7 @@ const createInventory = (components: TrackedComponent[]): ComponentInventorySnap
 const createVulnerability = (id: string): Vulnerability => ({
   affectedProducts: ['widget'],
   cvssScore: 8.1,
+  hydrationState: 'complete',
   id,
   publishedAt: '2026-01-01T00:00:00.000Z',
   references: [`https://example.com/${id}`],

@@ -11,6 +11,7 @@ import type { Vulnerability } from '../../../src/domain/entities/Vulnerability';
 const createVulnerability = (id: string, publishedAt: string): Vulnerability => ({
   affectedProducts: ['demo'],
   cvssScore: 7.5,
+  hydrationState: 'complete',
   id,
   publishedAt,
   references: [],

@@ -2,6 +2,7 @@ import type { IHttpClient } from '../../../application/ports/HttpClient';
 import type { FetchVulnerabilityOptions, FetchVulnerabilityResult, VulnerabilityFeed } from '../../../application/ports/VulnerabilityFeed';
 import { filterVulnerabilitiesByDateWindow } from '../../../application/dashboard/PublishedDateWindow';
 import type { Vulnerability } from '../../../domain/entities/Vulnerability';
+import { normalizeVulnerabilitySeverity } from '../../../domain/vulnerabilities/normalizeVulnerabilitySeverity';
 import {
   createVulnerabilitySeverityPolicy,
   type VulnerabilitySeverityPolicy
@@ -91,7 +92,7 @@ export class GenericJsonFeedClient extends ClientBase implements VulnerabilityFe
     const publishedAt = sanitizeText(record.publishedAt ?? new Date(0).toISOString());
     const updatedAt = sanitizeText(record.updatedAt ?? publishedAt);
 
-    return {
+    return normalizeVulnerabilitySeverity({
       id: sanitizeText(record.id ?? 'unknown'),
       source,
       title: sanitizeText(record.title ?? record.id ?? this.name),
@@ -103,6 +104,6 @@ export class GenericJsonFeedClient extends ClientBase implements VulnerabilityFe
       severity: resolvedSeverity.severity,
       references: (record.references ?? []).map((reference) => sanitizeUrl(reference)).filter(Boolean),
       affectedProducts: (record.affectedProducts ?? []).map((product) => sanitizeText(product)).filter(Boolean)
-    };
+    });
   }
 }
