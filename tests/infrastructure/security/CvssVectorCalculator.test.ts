@@ -40,7 +40,7 @@ test('CvssVectorCalculator resolves CVSS v2 vectors into numeric scores', () => 
   });
 });
 
-test('CvssVectorCalculator preserves unsupported CVSS v4 vectors without throwing', () => {
+test('CvssVectorCalculator derives a severity rating from CVSS v4 vectors without throwing', () => {
   const warnings: Array<{ event: string; context: Record<string, unknown> }> = [];
   const calculator = new CvssVectorCalculator({
     warn: (event, context) => {
@@ -54,17 +54,12 @@ test('CvssVectorCalculator preserves unsupported CVSS v4 vectors without throwin
   });
 
   assert.deepEqual(result, {
-    isSupported: false,
+    isSupported: true,
     method: 'CVSS_V4',
+    rating: 'critical',
     vector: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N'
   });
-  assert.deepEqual(warnings, [{
-    event: '[vulndash.cvss.unsupported_method]',
-    context: {
-      method: 'CVSS_V4',
-      score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N'
-    }
-  }]);
+  assert.deepEqual(warnings, []);
 });
 
 test('CvssVectorCalculator warns on invalid vectors instead of throwing', () => {

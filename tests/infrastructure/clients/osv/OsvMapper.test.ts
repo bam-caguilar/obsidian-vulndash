@@ -143,6 +143,7 @@ test('OSV mapper normalizes severity aliases and preserves package metadata with
     source: 'database-specific'
   });
   assert.equal(vulnerability.metadata?.cveId, 'CVE-2026-2000');
+  assert.equal(vulnerability.metadata?.ghsaId, undefined);
   assert.equal(vulnerability.metadata?.affectedPackages?.[0]?.purl, 'pkg:npm/@example/widget@1.2.3');
   assert.equal(vulnerability.metadata?.affectedPackages?.[0]?.version, '1.2.3');
   assert.equal(vulnerability.metadata?.vulnerableVersionRanges?.[0], '@example/widget: < 1.2.4');
@@ -225,7 +226,7 @@ test('OSV mapper preserves top-level and affected severity payloads for later no
   ]);
 });
 
-test('OSV mapper retains unsupported CVSS vectors as unknown severity without throwing', () => {
+test('OSV mapper derives severity from top-level CVSS v4 vectors without duplicating CVSS logic in the mapper', () => {
   const mapper = new OsvMapper('OSV');
 
   const vulnerability = mapper.normalize({
@@ -237,17 +238,69 @@ test('OSV mapper retains unsupported CVSS vectors as unknown severity without th
         score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N'
       }
     ],
-    summary: 'Unsupported CVSS v4 vector'
+    summary: 'Vector-only CVSS v4 severity'
   });
 
-  assert.equal(vulnerability.cvssScore, 0);
-  assert.equal(vulnerability.severity, 'NONE');
+  assert.equal(vulnerability.cvssScore, 9.5);
+  assert.equal(vulnerability.severity, 'CRITICAL');
   assert.deepEqual(vulnerability.normalizedSeverity, {
     method: 'CVSS_V4',
-    rating: 'unknown',
+    rating: 'critical',
     source: 'osv-top-level',
     vector: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N'
   });
+});
+
+test('OSV mapper resolves nested affected-package severity arrays ahead of weaker top-level records', () => {
+  const mapper = new OsvMapper('OSV');
+
+  const vulnerability = mapper.normalize({
+    affected: [
+      {
+        package: {
+          ecosystem: 'npm',
+          name: '@example/widget',
+          purl: 'pkg:npm/@example/widget@1.2.3'
+        },
+        severity: [
+          {
+            type: 'CVSS_V4',
+            score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N'
+          }
+        ]
+      }
+    ],
+    id: 'OSV-2026-4000A',
+    modified: '2026-04-22T00:00:00.000Z',
+    severity: [
+      {
+        type: 'CVSS_V3',
+        score: '4.3'
+      }
+    ],
+    summary: 'Affected severity should win'
+  }, 'pkg:npm/@example/widget@1.2.3');
+
+  assert.equal(vulnerability.cvssScore, 9.5);
+  assert.equal(vulnerability.severity, 'CRITICAL');
+  assert.deepEqual(vulnerability.normalizedSeverity, {
+    method: 'CVSS_V4',
+    rating: 'critical',
+    source: 'osv-affected',
+    vector: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N'
+  });
+  assert.deepEqual(vulnerability.metadata?.topLevelSeverity, [
+    {
+      score: '4.3',
+      type: 'CVSS_V3'
+    }
+  ]);
+  assert.deepEqual(vulnerability.metadata?.affectedPackages?.[0]?.severity, [
+    {
+      score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N',
+      type: 'CVSS_V4'
+    }
+  ]);
 });
 
 test('OSV mapper marks missing severity as unknown instead of blank', () => {

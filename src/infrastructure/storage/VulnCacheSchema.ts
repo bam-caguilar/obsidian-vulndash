@@ -3,7 +3,7 @@ import type { Vulnerability } from '../../domain/entities/Vulnerability';
 import type { TriageRecord } from '../../domain/triage/TriageRecord';
 
 export const VULN_CACHE_DB_NAME = 'vulndash-cache';
-export const VULN_CACHE_DB_VERSION = 3;
+export const VULN_CACHE_DB_VERSION = 4;
 
 export const VULN_CACHE_STORES = {
   componentQueries: 'componentQueries',
@@ -14,6 +14,7 @@ export const VULN_CACHE_STORES = {
 } as const;
 
 export const VULN_CACHE_INDEXES = {
+  byIdentifier: 'by-identifier',
   byLastSeenAt: 'by-last-seen-at',
   byRetentionRank: 'by-retention-rank',
   bySourceId: 'by-source-id',
@@ -31,6 +32,7 @@ export interface PersistedVulnerabilityRecord {
   readonly retentionRank: readonly [number, number, string];
   readonly sourceId: string;
   readonly vulnerability: Vulnerability;
+  readonly vulnerabilityIdentifiers: readonly string[];
   readonly vulnerabilityId: string;
 }
 
@@ -163,6 +165,35 @@ export const toRetentionRank = (record: {
   record.cacheKey
 ];
 
+const collectVulnerabilityIdentifiers = (vulnerability: Vulnerability): readonly string[] => {
+  const seen = new Set<string>();
+  const identifiers: string[] = [];
+
+  const addIdentifier = (value: string | undefined): void => {
+    const normalized = value?.trim();
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+
+    seen.add(normalized);
+    identifiers.push(normalized);
+  };
+
+  addIdentifier(vulnerability.id);
+  addIdentifier(vulnerability.metadata?.cveId);
+  addIdentifier(vulnerability.metadata?.ghsaId);
+
+  for (const identifier of vulnerability.metadata?.aliases ?? []) {
+    addIdentifier(identifier);
+  }
+
+  for (const identifier of vulnerability.metadata?.identifiers ?? []) {
+    addIdentifier(identifier);
+  }
+
+  return identifiers;
+};
+
 export const createPersistedVulnerabilityRecord = (
   sourceId: string,
   vulnerability: Vulnerability,
@@ -184,6 +215,7 @@ export const createPersistedVulnerabilityRecord = (
     retentionRank: toRetentionRank({ cacheKey, freshnessUpdatedAtMs, lastSeenAtMs }),
     sourceId,
     vulnerability,
+    vulnerabilityIdentifiers: collectVulnerabilityIdentifiers(vulnerability),
     vulnerabilityId: vulnerability.id
   };
 };
@@ -218,6 +250,10 @@ export const applyVulnCacheSchemaUpgrade = (
     keyPath: 'cacheKey'
   });
   ensureIndex(vulnerabilities, VULN_CACHE_INDEXES.bySourceId, 'sourceId', { unique: false });
+  ensureIndex(vulnerabilities, VULN_CACHE_INDEXES.byIdentifier, 'vulnerabilityIdentifiers', {
+    multiEntry: true,
+    unique: false
+  });
   ensureIndex(vulnerabilities, VULN_CACHE_INDEXES.byLastSeenAt, 'lastSeenAtMs', { unique: false });
   ensureIndex(vulnerabilities, VULN_CACHE_INDEXES.byRetentionRank, 'retentionRank', { unique: false });
 

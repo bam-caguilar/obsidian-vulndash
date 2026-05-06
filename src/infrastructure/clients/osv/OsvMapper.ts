@@ -323,8 +323,12 @@ export class OsvMapper {
 
     const metadata: VulnerabilityMetadata = {};
     const cveId = identifiers.find((identifier) => identifier.toUpperCase().startsWith('CVE-'));
+    const ghsaId = identifiers.find((identifier) => identifier.toUpperCase().startsWith('GHSA-'));
     if (cveId) {
       metadata.cveId = cveId;
+    }
+    if (ghsaId) {
+      metadata.ghsaId = ghsaId;
     }
     if (identifiers.length > 0) {
       metadata.identifiers = identifiers;
@@ -422,6 +426,16 @@ export class OsvMapper {
         candidates.push({
           ...(calculation.method ? { method: calculation.method } : {}),
           score: calculation.score,
+          source,
+          ...(calculation.vector ? { vector: calculation.vector } : {})
+        });
+        continue;
+      }
+
+      if (calculation.rating && calculation.rating !== 'unknown') {
+        candidates.push({
+          ...(calculation.method ? { method: calculation.method } : {}),
+          rating: calculation.rating,
           source,
           ...(calculation.vector ? { vector: calculation.vector } : {})
         });

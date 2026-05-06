@@ -1,3 +1,5 @@
+import type { SeverityRating } from '../vulnerabilities/SeverityRating';
+
 const NUMERIC_SCORE_PATTERN = /^(?:\d+|\d*\.\d+)$/;
 
 const roundToNearestTenth = (value: number): number => Math.round(value * 10) / 10;
@@ -183,6 +185,99 @@ const parseCvssV2Score = (vector: string): number | undefined => {
   return roundToNearestTenth(clampScore(baseScore));
 };
 
+const parseCvssV4Rating = (vector: string): SeverityRating | undefined => {
+  const metrics = parseMetricPairs(vector, /^CVSS:4\.0\//i);
+  if (!metrics) {
+    return undefined;
+  }
+
+  const attackVector = {
+    N: 1,
+    A: 0.8,
+    L: 0.6,
+    P: 0.2
+  }[metrics.AV ?? ''];
+  const attackComplexity = {
+    L: 1,
+    H: 0.6
+  }[metrics.AC ?? ''];
+  const attackRequirements = {
+    N: 1,
+    P: 0.75
+  }[metrics.AT ?? ''];
+  const privilegesRequired = {
+    N: 1,
+    L: 0.7,
+    H: 0.4
+  }[metrics.PR ?? ''];
+  const userInteraction = {
+    N: 1,
+    P: 0.75,
+    A: 0.5
+  }[metrics.UI ?? ''];
+
+  const impactWeight = (value: string | undefined): number | undefined => ({
+    H: 1,
+    L: 0.5,
+    N: 0
+  })[value ?? ''];
+
+  const directImpactMetrics = [metrics.VC, metrics.VI, metrics.VA];
+  const subsequentImpactMetrics = [metrics.SC, metrics.SI, metrics.SA];
+  const directImpacts = directImpactMetrics
+    .map((metric) => impactWeight(metric))
+    .filter((metric): metric is number => metric !== undefined);
+  const subsequentImpacts = subsequentImpactMetrics
+    .map((metric) => impactWeight(metric))
+    .filter((metric): metric is number => metric !== undefined);
+
+  if (
+    attackVector === undefined
+    || attackComplexity === undefined
+    || attackRequirements === undefined
+    || privilegesRequired === undefined
+    || userInteraction === undefined
+    || directImpacts.length !== directImpactMetrics.length
+    || subsequentImpacts.length !== subsequentImpactMetrics.length
+  ) {
+    return undefined;
+  }
+
+  const directImpactScore = directImpacts.reduce((total, metric) => total + metric, 0);
+  const subsequentImpactScore = subsequentImpacts.reduce((total, metric) => total + metric, 0);
+  if (directImpactScore === 0 && subsequentImpactScore === 0) {
+    return 'none';
+  }
+
+  const directHighCount = directImpacts.filter((metric) => metric >= 1).length;
+  const exploitabilityScore = (
+    attackVector
+    + attackComplexity
+    + attackRequirements
+    + privilegesRequired
+    + userInteraction
+  ) / 5;
+  const weightedImpactScore = directImpactScore + (subsequentImpactScore * 0.75);
+
+  if (directHighCount >= 2 && exploitabilityScore >= 0.85) {
+    return 'critical';
+  }
+
+  if (directHighCount >= 1 && exploitabilityScore >= 0.6) {
+    return 'high';
+  }
+
+  if (weightedImpactScore >= 2.25) {
+    return exploitabilityScore >= 0.45 ? 'high' : 'medium';
+  }
+
+  if (weightedImpactScore >= 1) {
+    return exploitabilityScore >= 0.35 ? 'medium' : 'low';
+  }
+
+  return 'low';
+};
+
 export const parseCvssScore = (value: string, type?: string): number | undefined => {
   const numericScore = parseNumericScore(value);
   if (numericScore !== undefined) {
@@ -196,6 +291,20 @@ export const parseCvssScore = (value: string, type?: string): number | undefined
 
   if (value.trim().toUpperCase().startsWith('CVSS:2.0/') || normalizedType.includes('V2')) {
     return parseCvssV2Score(value);
+  }
+
+  return undefined;
+};
+
+export const resolveCvssSeverityRating = (
+  value: string,
+  type?: string
+): SeverityRating | undefined => {
+  const normalizedType = type?.trim().toUpperCase() ?? '';
+  const normalizedValue = value.trim().toUpperCase();
+
+  if (normalizedValue.startsWith('CVSS:4.') || normalizedType.includes('V4')) {
+    return parseCvssV4Rating(value);
   }
 
   return undefined;

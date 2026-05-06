@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyVulnCacheSchemaUpgrade, VULN_CACHE_INDEXES, VULN_CACHE_STORES } from '../../../src/infrastructure/storage/VulnCacheSchema';
+import {
+  applyVulnCacheSchemaUpgrade,
+  createPersistedVulnerabilityRecord,
+  VULN_CACHE_INDEXES,
+  VULN_CACHE_STORES
+} from '../../../src/infrastructure/storage/VulnCacheSchema';
 
 class FakeDomStringList {
   private readonly values = new Set<string>();
@@ -53,12 +58,13 @@ class FakeDatabase {
 test('schema upgrade creates vulnerability, triage, and sync metadata stores with required indexes', () => {
   const database = new FakeDatabase();
 
-  applyVulnCacheSchemaUpgrade(database as unknown as IDBDatabase, 0, 3);
+  applyVulnCacheSchemaUpgrade(database as unknown as IDBDatabase, 0, 4);
 
   const vulnerabilities = database.getStore(VULN_CACHE_STORES.vulnerabilities);
   assert.ok(vulnerabilities);
   assert.equal(vulnerabilities?.keyPath, 'cacheKey');
   assert.equal(vulnerabilities?.indexNames.contains(VULN_CACHE_INDEXES.bySourceId), true);
+  assert.equal(vulnerabilities?.indexNames.contains(VULN_CACHE_INDEXES.byIdentifier), true);
   assert.equal(vulnerabilities?.indexNames.contains(VULN_CACHE_INDEXES.byLastSeenAt), true);
   assert.equal(vulnerabilities?.indexNames.contains(VULN_CACHE_INDEXES.byRetentionRank), true);
   const triageRecords = database.getStore(VULN_CACHE_STORES.triageRecords);
@@ -80,9 +86,37 @@ test('schema upgrade from version 2 adds the componentQueries store', () => {
   database.createObjectStore(VULN_CACHE_STORES.databaseMetadata, { keyPath: 'key' });
   database.createObjectStore(VULN_CACHE_STORES.triageRecords, { keyPath: 'correlationKey' });
 
-  applyVulnCacheSchemaUpgrade(database as unknown as IDBDatabase, 2, 3);
+  applyVulnCacheSchemaUpgrade(database as unknown as IDBDatabase, 2, 4);
 
   const componentQueries = database.getStore(VULN_CACHE_STORES.componentQueries);
   assert.ok(componentQueries);
   assert.equal(componentQueries?.keyPath, 'purl');
+});
+
+test('persisted vulnerability records capture alias identifiers for multi-entry lookups', () => {
+  const record = createPersistedVulnerabilityRecord('osv-default', {
+    affectedProducts: [],
+    cvssScore: 9.5,
+    hydrationState: 'complete',
+    id: 'GHSA-aaaa-bbbb-cccc',
+    metadata: {
+      aliases: ['OSV-2026-1234'],
+      cveId: 'CVE-2026-1234',
+      ghsaId: 'GHSA-aaaa-bbbb-cccc',
+      identifiers: ['GHSA-aaaa-bbbb-cccc', 'CVE-2026-1234']
+    },
+    publishedAt: '2026-01-01T00:00:00.000Z',
+    references: [],
+    severity: 'CRITICAL',
+    source: 'OSV',
+    summary: 'summary',
+    title: 'title',
+    updatedAt: '2026-01-02T00:00:00.000Z'
+  }, '2026-04-22T00:00:00.000Z', 1_710_000_000_000);
+
+  assert.deepEqual(record.vulnerabilityIdentifiers, [
+    'GHSA-aaaa-bbbb-cccc',
+    'CVE-2026-1234',
+    'OSV-2026-1234'
+  ]);
 });
