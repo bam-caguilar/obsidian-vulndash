@@ -1,4 +1,5 @@
 import type { NormalizedSbomFormat } from '../../../domain/sbom/types';
+import type { VulnerabilityHydrationState } from '../../../domain/vulnerabilities/VulnerabilityHydrationState';
 import type { SeverityRating } from '../../../domain/vulnerabilities/SeverityRating';
 import type {
   ComponentPurlMatchSummary,
@@ -49,6 +50,7 @@ export interface ComponentInventoryDisplayEntry {
   allSeverities: readonly SeverityRating[];
   component: TrackedComponent;
   highestSeverity: DisplaySeverity | undefined;
+  hydrationState: VulnerabilityHydrationState;
   relatedVulnerabilities: readonly RelatedVulnerabilitySummary[];
   visibleSources: readonly TrackedComponentSource[];
   vulnerabilityCount: number;
@@ -83,6 +85,37 @@ const getEffectiveHighestSeverity = (
     ...relatedVulnerabilities.map((vulnerability) =>
       resolveDisplaySeverity(vulnerability.normalizedSeverity, vulnerability.severity))
   ]);
+
+const hydrationStatePriority: Record<VulnerabilityHydrationState, number> = {
+  complete: 1,
+  enriching: 4,
+  failed: 3,
+  incomplete: 2,
+  notApplicable: 0
+};
+
+const resolveComponentHydrationState = (
+  highestSeverity: DisplaySeverity | undefined,
+  relatedVulnerabilities: readonly RelatedVulnerabilitySummary[]
+): VulnerabilityHydrationState => {
+  if (relatedVulnerabilities.length === 0) {
+    return 'notApplicable';
+  }
+
+  const severityMatched = relatedVulnerabilities.filter((vulnerability) =>
+    resolveDisplaySeverity(vulnerability.normalizedSeverity, vulnerability.severity) === highestSeverity
+  );
+  const candidates = severityMatched.length > 0 ? severityMatched : relatedVulnerabilities;
+
+  let current: VulnerabilityHydrationState = 'notApplicable';
+  for (const vulnerability of candidates) {
+    if (hydrationStatePriority[vulnerability.hydrationState] > hydrationStatePriority[current]) {
+      current = vulnerability.hydrationState;
+    }
+  }
+
+  return current;
+};
 
 const matchesSourceScope = (
   source: TrackedComponentSource,
@@ -193,18 +226,20 @@ const toDisplayEntry = (
     })
     .filter((r): r is SeverityRating => r !== undefined);
   const allSeverities = Array.from(new Set([...graphSeverities, ...embeddedSeverities]));
+  const highestSeverity = getEffectiveHighestSeverity(
+    [
+      ...embeddedVulnerabilities.map((vulnerability) =>
+        resolveDisplaySeverity(vulnerability.normalizedSeverity, vulnerability.severity)),
+      visibleSources.length === component.sources.length ? component.highestSeverity : undefined
+    ],
+    relatedVulnerabilities
+  );
 
   return {
     allSeverities,
     component,
-    highestSeverity: getEffectiveHighestSeverity(
-      [
-        ...embeddedVulnerabilities.map((vulnerability) =>
-          resolveDisplaySeverity(vulnerability.normalizedSeverity, vulnerability.severity)),
-        visibleSources.length === component.sources.length ? component.highestSeverity : undefined
-      ],
-      relatedVulnerabilities
-    ),
+    highestSeverity,
+    hydrationState: resolveComponentHydrationState(highestSeverity, relatedVulnerabilities),
     relatedVulnerabilities,
     visibleSources,
     vulnerabilityCount: getUniqueVulnerabilityCount(

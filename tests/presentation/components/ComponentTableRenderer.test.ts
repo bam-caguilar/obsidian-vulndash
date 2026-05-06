@@ -57,6 +57,7 @@ const createRelatedVulnerability = (
 ): RelatedVulnerabilitySummary => ({
   cvssScore: 8.1,
   evidence: 'purl',
+  hydrationState: 'complete',
   id: 'CVE-2026-0001',
   referenceCount: 1,
   severity: 'HIGH',
@@ -81,6 +82,7 @@ const createRowModel = (
     component,
     componentName: component.name,
     highestSeverity,
+    hydrationState: overrides.hydrationState ?? 'notApplicable',
     identifierLabel: component.purl ?? component.cpe ?? 'None',
     isExpanded,
     isSelected,
@@ -93,6 +95,7 @@ const createRowModel = (
       component.version ?? '',
       String(vulnerabilityCount),
       highestSeverity ?? '',
+      overrides.hydrationState ?? 'notApplicable',
       isExpanded ? 'expanded' : 'collapsed',
       isSelected ? 'selected' : 'unselected',
       relatedVulnerabilities.map((vulnerability) => vulnerability.id).join('|')

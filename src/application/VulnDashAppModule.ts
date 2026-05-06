@@ -1,4 +1,8 @@
 import { ResolveAffectedProjects } from './correlation/ResolveAffectedProjects';
+import {
+  DefaultVulnerabilityHydrationCoordinator,
+  type VulnerabilityHydrationPersistencePort
+} from './services/DefaultVulnerabilityHydrationCoordinator';
 import type { ImportedSbomConfig, VulnDashSettings } from './use-cases/types';
 import { SettingsMigrator, type SettingsMigrationInput } from './settings/SettingsMigrator';
 import { AlertEngine } from './use-cases/EvaluateAlertsUseCase';
@@ -26,8 +30,10 @@ import { RollupMarkdownRenderer } from './rollup/RollupMarkdownRenderer';
 import { DailyRollupNoteWriter } from '../infrastructure/obsidian/DailyRollupNoteWriter';
 import { ComponentNoteResolverFactory } from '../infrastructure/obsidian-adapters/ObsidianNoteResolver';
 import { CooperativeScheduler } from '../infrastructure/async/CooperativeScheduler';
+import { AsyncTaskCoordinator } from '../infrastructure/async/AsyncTaskCoordinator';
 import { CacheHydrator } from '../infrastructure/storage/CacheHydrator';
 import { CachePruner } from '../infrastructure/storage/CachePruner';
+import { FEED_TYPES } from '../domain/feeds/FeedTypes';
 import { IndexedDbTriageRepository } from '../infrastructure/storage/IndexedDbTriageRepository';
 import { JoinTriageState } from './triage/JoinTriageState';
 import { LegacyDataMigration } from '../infrastructure/storage/LegacyDataMigration';
@@ -36,6 +42,9 @@ import { SyncMetadataRepository } from '../infrastructure/storage/SyncMetadataRe
 import { VulnCacheDb } from '../infrastructure/storage/VulnCacheDb';
 import { VulnCacheRepository } from '../infrastructure/storage/VulnCacheRepository';
 import type { IOsvQueryCache } from '../infrastructure/clients/osv/IOsvQueryCache';
+import type { VulnerabilityHydrationCoordinator } from './ports/VulnerabilityHydrationCoordinator';
+import { OsvVulnerabilityHydrationService } from '../infrastructure/services/OsvVulnerabilityHydrationService';
+import { getDefaultOsvFeedConfig } from './use-cases/DefaultSettings';
 
 type ProjectNoteLookupVaultFacade = ConstructorParameters<typeof ProjectNoteLookupService>[0];
 type ComponentNoteResolverVaultFacade = ConstructorParameters<typeof ComponentNoteResolverFactory>[0];
@@ -80,6 +89,11 @@ export interface CreateSyncServiceOptions {
   readonly settings: Pick<VulnDashSettings, 'cacheStorage' | 'feeds' | 'sourceSyncCursor' | 'syncControls'>;
 }
 
+export interface CreateVulnerabilityHydrationCoordinatorOptions {
+  readonly cacheStore: VulnerabilityHydrationPersistencePort;
+  readonly settings: Pick<VulnDashSettings, 'feeds' | 'syncControls'>;
+}
+
 export interface VulnDashAppModuleOptions {
   readonly getActiveWorkspacePurls: () => Promise<readonly string[]>;
   readonly getSboms: () => readonly ImportedSbomConfig[];
@@ -113,6 +127,7 @@ export class VulnDashAppModule {
   public readonly sbomImportService: SbomImportService;
   public readonly sbomProjectMappingRepository: SbomProjectMappingRepository;
   public readonly settingsMigrator = new SettingsMigrator();
+  private readonly asyncTaskCoordinator = new AsyncTaskCoordinator();
   private readonly createHttpClient: () => IHttpClient;
   private readonly getActiveWorkspacePurls: () => Promise<readonly string[]>;
   private readonly storageScheduler: CooperativeScheduler;
@@ -210,6 +225,30 @@ export class VulnDashAppModule {
     });
   }
 
+  public createVulnerabilityHydrationCoordinator(
+    options: CreateVulnerabilityHydrationCoordinatorOptions
+  ): VulnerabilityHydrationCoordinator {
+    const configuredOsvFeed = options.settings.feeds.find((feed) => feed.type === FEED_TYPES.OSV) ?? getDefaultOsvFeedConfig();
+
+    return new DefaultVulnerabilityHydrationCoordinator(
+      options.cacheStore,
+      new OsvVulnerabilityHydrationService(
+        this.asyncTaskCoordinator,
+        () => this.createHttpClient(),
+        {
+          name: configuredOsvFeed.name,
+          osvEndpointUrl: configuredOsvFeed.osvEndpointUrl
+        },
+        {
+          backoffBaseMs: options.settings.syncControls.backoffBaseMs,
+          maxItems: options.settings.syncControls.maxItems,
+          maxPages: options.settings.syncControls.maxPages,
+          retryCount: options.settings.syncControls.retryCount
+        }
+      )
+    );
+  }
+
   public async initializePersistentCache(
     loadedPluginData: SettingsMigrationInput | null,
     settings: Pick<VulnDashSettings, 'cacheStorage' | 'feeds'>
@@ -285,6 +324,7 @@ export class VulnDashAppModule {
   }
 
   public async closePersistentCache(persistentCacheServices: PersistentCacheServices | null): Promise<void> {
+    this.asyncTaskCoordinator.dispose();
     if (!persistentCacheServices) {
       return;
     }

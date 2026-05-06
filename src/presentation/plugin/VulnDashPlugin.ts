@@ -22,6 +22,7 @@ import type {
   TrackedComponent
 } from '../../application/sbom/types';
 import { ComponentIdentityService } from '../../application/sbom/ComponentIdentityService';
+import type { VulnerabilityHydrationCoordinator } from '../../application/ports/VulnerabilityHydrationCoordinator';
 import type { PipelineEvent } from '../../application/pipeline/PipelineEvents';
 import type { ChangedVulnerabilityIds } from '../../application/pipeline/PipelineTypes';
 import { buildVulnerabilityCacheKey, createEmptyChangedVulnerabilityIds } from '../../application/pipeline/PipelineTypes';
@@ -85,7 +86,8 @@ import { CredentialStore } from '../../infrastructure/security/CredentialStore';
 import { buildComponentRelationshipGraphFromCache } from './ComponentRelationshipGraph';
 import {
   parsePersistedVulnerabilityKey,
-  type PersistedComponentQueryRecord
+  type PersistedComponentQueryRecord,
+  type PersistedVulnerabilityRecord
 } from '../../infrastructure/storage/VulnCacheSchema';
 
 const areStringListsEqual = (left: string[], right: string[]): boolean =>
@@ -133,10 +135,12 @@ export default class VulnDashPlugin extends Plugin {
   private syncServiceGeneration = 0;
   private dataProcessingChain: Promise<void> = Promise.resolve();
   private persistentCacheServices: PersistentCacheServices | null = null;
+  private cacheRepositoryUnsubscribe: (() => void) | null = null;
   private readonly credentialStore = new CredentialStore();
   private loadedPluginData: LoadedPluginData | null = null;
   private lastFetchAt = 0;
   private cachedVulnerabilities: Vulnerability[] = [];
+  private vulnerabilityHydrationCoordinator: VulnerabilityHydrationCoordinator | null = null;
   private visibleVulnerabilities: Vulnerability[] = [];
   private affectedProjectsByVulnerabilityRef = new Map<string, AffectedProjectResolution>();
   private previousVisibleIds = new Set<string>();
@@ -201,6 +205,8 @@ export default class VulnDashPlugin extends Plugin {
 
   public override onunload(): void {
     this.stopPollingLoop();
+    this.cacheRepositoryUnsubscribe?.();
+    this.cacheRepositoryUnsubscribe = null;
     void this.getAppModule().closePersistentCache(this.persistentCacheServices);
   }
 
@@ -573,6 +579,7 @@ export default class VulnDashPlugin extends Plugin {
       this.cachedVulnerabilities,
       { purlQueryCacheMatches: queryCacheContext.matchesByPurl }
     );
+    this.dispatchComponentInventoryHydration(relationships, queryCacheContext);
 
     return {
       inventory,
@@ -583,6 +590,42 @@ export default class VulnDashPlugin extends Plugin {
       ),
       relationships
     };
+  }
+
+  private dispatchComponentInventoryHydration(
+    relationships: ComponentRelationshipGraph,
+    queryCacheContext: ComponentQueryCacheContext
+  ): void {
+    const coordinator = this.vulnerabilityHydrationCoordinator;
+    if (!coordinator) {
+      return;
+    }
+
+    const vulnerabilityByRef = new Map<string, Vulnerability>();
+    const toRef = (vulnerability: Pick<Vulnerability, 'id' | 'source'>): string =>
+      `${vulnerability.source.trim().toLowerCase()}::${vulnerability.id.trim().toLowerCase()}`;
+
+    for (const vulnerability of this.cachedVulnerabilities) {
+      vulnerabilityByRef.set(toRef(vulnerability), vulnerability);
+    }
+
+    for (const matches of queryCacheContext.matchesByPurl.values()) {
+      for (const match of matches) {
+        vulnerabilityByRef.set(toRef(match.vulnerability), match.vulnerability);
+      }
+    }
+
+    const candidates = Array.from(relationships.componentsByVulnerability.keys())
+      .map((ref) => vulnerabilityByRef.get(ref))
+      .filter((vulnerability): vulnerability is Vulnerability => Boolean(vulnerability));
+    if (candidates.length === 0) {
+      return;
+    }
+
+    void coordinator.ensureHydratedMany(candidates)
+      .catch((error: unknown) => {
+        console.warn('[vulndash.hydration.dispatch_failed]', error);
+      });
   }
 
   public async getSbomComponents(sbomId: string): Promise<ResolvedSbomComponent[] | null> {
@@ -1356,6 +1399,16 @@ export default class VulnDashPlugin extends Plugin {
     }
   }
 
+  private invalidateComponentInventoryViews(): void {
+    const leaves = this.app.workspace.getLeavesOfType(VULNDASH_VIEW_TYPE);
+    for (const leaf of leaves) {
+      const view = leaf.view;
+      if (view instanceof VulnDashView) {
+        view.invalidateComponentInventory();
+      }
+    }
+  }
+
   private updateViewSettings(): void {
     const leaves = this.app.workspace.getLeavesOfType(VULNDASH_VIEW_TYPE);
     for (const leaf of leaves) {
@@ -1400,12 +1453,21 @@ export default class VulnDashPlugin extends Plugin {
 
   private async initializePersistentCache(): Promise<void> {
     const result = await this.getAppModule().initializePersistentCache(this.loadedPluginData, this.settings);
+    this.cacheRepositoryUnsubscribe?.();
+    this.cacheRepositoryUnsubscribe = null;
     this.persistentCacheServices = result.persistentCacheServices;
     this.triageJoinUseCase = result.triageJoinUseCase;
     this.triageSetUseCase = result.triageSetUseCase;
+    this.configureVulnerabilityHydrationCoordinator();
     if (result.cachedVulnerabilities.length > 0) {
       this.cachedVulnerabilities = [...result.cachedVulnerabilities];
       this.lastFetchAt = result.lastFetchAt;
+    }
+
+    if (this.persistentCacheServices) {
+      this.cacheRepositoryUnsubscribe = this.persistentCacheServices.cacheRepository.onVulnerabilityUpdates((records) => {
+        void this.handlePersistedVulnerabilityUpdates(records);
+      });
     }
 
     if (result.removedLegacyFields) {
@@ -1415,6 +1477,55 @@ export default class VulnDashPlugin extends Plugin {
       });
       await this.saveSettings();
     }
+  }
+
+  private configureVulnerabilityHydrationCoordinator(): void {
+    if (!this.persistentCacheServices) {
+      this.vulnerabilityHydrationCoordinator = null;
+      return;
+    }
+
+    this.vulnerabilityHydrationCoordinator = this.getAppModule().createVulnerabilityHydrationCoordinator({
+      cacheStore: this.persistentCacheServices.cacheRepository,
+      settings: this.settings
+    });
+  }
+
+  private async handlePersistedVulnerabilityUpdates(
+    records: readonly PersistedVulnerabilityRecord[]
+  ): Promise<void> {
+    const updatedByRuntimeKey = new Map(records.map((record) => [
+      this.getVulnerabilityCacheKey(record.vulnerability),
+      record.vulnerability
+    ] as const));
+    const updatedKeys: string[] = [];
+    let didUpdateCachedVulnerabilities = false;
+
+    this.cachedVulnerabilities = this.cachedVulnerabilities.map((vulnerability) => {
+      const cacheKey = this.getVulnerabilityCacheKey(vulnerability);
+      const updated = updatedByRuntimeKey.get(cacheKey);
+      if (!updated) {
+        return vulnerability;
+      }
+
+      didUpdateCachedVulnerabilities = true;
+      updatedKeys.push(cacheKey);
+      return updated;
+    });
+
+    this.invalidateComponentInventoryViews();
+
+    if (!didUpdateCachedVulnerabilities) {
+      return;
+    }
+
+    await this.processData(this.cachedVulnerabilities, {
+      added: [],
+      removed: [],
+      updated: updatedKeys
+    }, {
+      suppressNotifications: true
+    });
   }
   private async loadSettings(): Promise<void> {
     const loaded = await this.loadData();
@@ -1499,6 +1610,7 @@ export default class VulnDashPlugin extends Plugin {
   ): Promise<void> {
     this.settings = normalizeRuntimeSettings(next);
     this.invalidateSyncService();
+    this.configureVulnerabilityHydrationCoordinator();
     await this.saveSettings();
     this.persistentCacheServices?.cachePruner.schedule(this.settings.cacheStorage);
 

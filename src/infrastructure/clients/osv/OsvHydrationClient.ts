@@ -33,6 +33,7 @@ export interface OsvHydrationFailedResult {
   readonly failureKind: OsvHydrationFailureKind;
   readonly message: string;
   readonly retriesPerformed: number;
+  readonly retryAfterMs?: number;
   readonly retryable: boolean;
   readonly status: 'failed';
   readonly statusCode?: number;
@@ -230,6 +231,7 @@ export class OsvHydrationClient extends ClientBase {
           failureKind: 'request-failed',
           message: error.message,
           retriesPerformed: 0,
+          ...(error.metadata.retryAfterMs !== undefined ? { retryAfterMs: error.metadata.retryAfterMs } : {}),
           retryable: error.retryable,
           status: 'failed',
           ...(error.metadata.status !== undefined ? { statusCode: error.metadata.status } : {}),

@@ -1,8 +1,14 @@
 import type { RenderDailyRollupInput, RenderedDailyRollup } from '../../application/rollup/RollupMarkdownRenderer';
 import type { NormalizedVulnerabilityBatch, PipelineBatchInput } from '../../application/pipeline/PipelineTypes';
+import type { OsvFeedConfig, SyncControls } from '../../application/use-cases/types';
+import type { Vulnerability } from '../../domain/entities/Vulnerability';
 import type { NormalizedSbomDocument } from '../../domain/sbom/types';
 
-export type AsyncTaskKind = 'normalize-vulnerabilities' | 'parse-sbom' | 'render-daily-rollup';
+export type AsyncTaskKind =
+  | 'hydrate-vulnerability'
+  | 'normalize-vulnerabilities'
+  | 'parse-sbom'
+  | 'render-daily-rollup';
 
 export interface AsyncTaskToken {
   readonly generation: number;
@@ -31,6 +37,20 @@ export interface NormalizeVulnerabilityTaskResult {
   readonly batch: NormalizedVulnerabilityBatch;
 }
 
+export interface HydrateVulnerabilityTaskRequest {
+  readonly vulnerability: Vulnerability;
+  readonly osvConfig: Pick<OsvFeedConfig, 'name' | 'osvEndpointUrl'>;
+  readonly syncControls: Pick<SyncControls, 'backoffBaseMs' | 'maxItems' | 'maxPages' | 'retryCount'>;
+  readonly requestedAtMs?: number;
+}
+
+export interface HydrateVulnerabilityTaskResult {
+  readonly reason?: string;
+  readonly retryAfterMs?: number;
+  readonly status: 'failed' | 'hydrated' | 'queued' | 'skipped';
+  readonly vulnerability: Vulnerability;
+}
+
 export type RenderDailyRollupTaskRequest = RenderDailyRollupInput;
 
 export interface RenderDailyRollupTaskResult {
@@ -38,12 +58,14 @@ export interface RenderDailyRollupTaskResult {
 }
 
 export interface AsyncTaskPayloadByKind {
+  readonly 'hydrate-vulnerability': HydrateVulnerabilityTaskRequest;
   readonly 'normalize-vulnerabilities': NormalizeVulnerabilityTaskRequest;
   readonly 'parse-sbom': ParseSbomTaskRequest;
   readonly 'render-daily-rollup': RenderDailyRollupTaskRequest;
 }
 
 export interface AsyncTaskResultByKind {
+  readonly 'hydrate-vulnerability': HydrateVulnerabilityTaskResult;
   readonly 'normalize-vulnerabilities': NormalizeVulnerabilityTaskResult;
   readonly 'parse-sbom': ParseSbomTaskResult;
   readonly 'render-daily-rollup': RenderDailyRollupTaskResult;

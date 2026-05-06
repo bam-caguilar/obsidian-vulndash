@@ -304,6 +304,12 @@ export class VulnDashView extends ItemView {
     }
   }
 
+  public invalidateComponentInventory(): void {
+    this.componentWorkspaceDirty = true;
+    this.componentWorkspaceSnapshot = null;
+    this.componentInventoryView.invalidate();
+  }
+
   private buildLayout(): void {
     const { contentEl } = this;
     contentEl.empty();

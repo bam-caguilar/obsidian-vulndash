@@ -1,5 +1,6 @@
 import type { NormalizedSeverity as ParsedSbomSeverity } from '../../domain/sbom/types';
 import type { NormalizedSeverity as ResolvedSeverity } from '../../domain/vulnerabilities/NormalizedSeverity';
+import type { VulnerabilityHydrationState } from '../../domain/vulnerabilities/VulnerabilityHydrationState';
 import {
   getSeverityRatingRank,
   resolveSeverityRating,
@@ -124,8 +125,14 @@ export const formatDisplaySeverity = (
 };
 
 export const getSeverityBadgeClassName = (
-  severity: DisplaySeverity | undefined
-): string => `vulndash-severity-pill is-${severity ?? 'none'}`;
+  severity: DisplaySeverity | undefined,
+  hydrationState: VulnerabilityHydrationState = 'notApplicable'
+): string => [
+  'vulndash-severity-pill',
+  `is-${severity ?? 'none'}`,
+  hydrationState === 'enriching' ? 'is-hydrating' : '',
+  hydrationState === 'failed' ? 'has-hydration-failed' : ''
+].filter(Boolean).join(' ');
 
 export const matchesDisplaySeverityFilter = (
   severity: DisplaySeverity | undefined,

@@ -165,7 +165,7 @@ export const toRetentionRank = (record: {
   record.cacheKey
 ];
 
-const collectVulnerabilityIdentifiers = (vulnerability: Vulnerability): readonly string[] => {
+export const collectPersistedVulnerabilityIdentifiers = (vulnerability: Vulnerability): readonly string[] => {
   const seen = new Set<string>();
   const identifiers: string[] = [];
 
@@ -215,7 +215,7 @@ export const createPersistedVulnerabilityRecord = (
     retentionRank: toRetentionRank({ cacheKey, freshnessUpdatedAtMs, lastSeenAtMs }),
     sourceId,
     vulnerability,
-    vulnerabilityIdentifiers: collectVulnerabilityIdentifiers(vulnerability),
+    vulnerabilityIdentifiers: collectPersistedVulnerabilityIdentifiers(vulnerability),
     vulnerabilityId: vulnerability.id
   };
 };

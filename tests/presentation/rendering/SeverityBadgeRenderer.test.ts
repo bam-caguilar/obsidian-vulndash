@@ -75,3 +75,17 @@ test('getSeverityBadgeClassName returns correct class for unknown', () => {
 test('getSeverityBadgeClassName falls back to is-none for undefined', () => {
   assert.equal(getSeverityBadgeClassName(undefined), 'vulndash-severity-pill is-none');
 });
+
+test('getSeverityBadgeClassName appends hydrating state class', () => {
+  assert.equal(
+    getSeverityBadgeClassName('unknown', 'enriching'),
+    'vulndash-severity-pill is-unknown is-hydrating'
+  );
+});
+
+test('getSeverityBadgeClassName appends failed state class', () => {
+  assert.equal(
+    getSeverityBadgeClassName('unknown', 'failed'),
+    'vulndash-severity-pill is-unknown has-hydration-failed'
+  );
+});

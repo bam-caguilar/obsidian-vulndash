@@ -1,4 +1,8 @@
 export const WORKER_BUNDLE_LOADERS = {
+  'hydrate-vulnerability': async (): Promise<string> => {
+    const module = await import('virtual:vulndash-worker/hydrateVulnerability');
+    return module.default;
+  },
   'normalize-vulnerabilities': async (): Promise<string> => {
     const module = await import('virtual:vulndash-worker/normalize');
     return module.default;
