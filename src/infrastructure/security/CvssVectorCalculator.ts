@@ -4,7 +4,10 @@ import type {
   CvssCalculator
 } from '../../domain/vulnerabilities/CvssCalculator';
 import type { NormalizedSeverityMethod } from '../../domain/vulnerabilities/NormalizedSeverity';
-import { parseCvssScore } from '../../domain/services/CvssVectorParser';
+import {
+  parseCvssScore,
+  resolveCvssSeverityRating
+} from '../../domain/services/CvssVectorParser';
 import { sanitizeText } from './sanitize';
 
 const inferCvssMethod = (
@@ -60,15 +63,15 @@ export class CvssVectorCalculator implements CvssCalculator {
     }
 
     if (method === 'CVSS_V4') {
-      this.warn('[vulndash.cvss.unsupported_method]', {
-        method,
-        score: normalizedScore
-      });
-      return {
-        isSupported: false,
-        method,
-        ...(vector ? { vector } : {})
-      };
+      const rating = resolveCvssSeverityRating(normalizedScore, normalizedType);
+      if (rating !== undefined) {
+        return {
+          isSupported: true,
+          method,
+          rating,
+          ...(vector ? { vector } : {})
+        };
+      }
     }
 
     const score = parseCvssScore(normalizedScore, normalizedType);

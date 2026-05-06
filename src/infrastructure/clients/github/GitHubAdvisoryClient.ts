@@ -8,6 +8,7 @@ import type {
   VulnerabilitySourceUrls
 } from '../../../domain/entities/Vulnerability';
 import { filterVulnerabilitiesByDateWindow } from '../../../application/dashboard/PublishedDateWindow';
+import { normalizeVulnerabilitySeverity } from '../../../domain/vulnerabilities/normalizeVulnerabilitySeverity';
 import {
   createVulnerabilitySeverityPolicy,
   type VulnerabilitySeverityPolicy
@@ -320,7 +321,7 @@ export class GitHubAdvisoryClient extends ClientBase implements VulnerabilityFee
       ...(advisory.references ?? []).map((reference) => sanitizeUrl(reference))
     ]);
 
-    return {
+    return normalizeVulnerabilitySeverity({
       id: ghsaId || cveId || 'unknown',
       source: sourceLabel,
       title: sanitizeText(advisory.summary ?? advisory.ghsa_id ?? 'GitHub Advisory'),
@@ -333,6 +334,6 @@ export class GitHubAdvisoryClient extends ClientBase implements VulnerabilityFee
       references,
       affectedProducts: packages,
       ...(Object.keys(metadata).length > 0 ? { metadata } : {})
-    };
+    });
   }
 }

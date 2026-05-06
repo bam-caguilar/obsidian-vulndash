@@ -2,6 +2,7 @@ import type {
   RelatedVulnerabilitySummary,
   TrackedComponent
 } from '../../../application/sbom/types';
+import type { VulnerabilityHydrationState } from '../../../domain/vulnerabilities/VulnerabilityHydrationState';
 import {
   formatDisplaySeverity,
   getSeverityBadgeClassName,
@@ -17,6 +18,7 @@ export interface ComponentTableRowModel {
   readonly component: TrackedComponent;
   readonly componentName: string;
   readonly highestSeverity: DisplaySeverity | undefined;
+  readonly hydrationState: VulnerabilityHydrationState;
   readonly identifierLabel: string;
   readonly isExpanded: boolean;
   readonly isSelected: boolean;
@@ -367,7 +369,7 @@ export class ComponentTableRenderer {
     const stack = createDiv('vulndash-component-vuln-stack');
     stack.appendChild(createDiv(undefined, String(rowModel.vulnerabilityCount)));
     stack.appendChild(createDiv(
-      getSeverityBadgeClassName(rowModel.highestSeverity),
+      getSeverityBadgeClassName(rowModel.highestSeverity, rowModel.hydrationState),
       formatDisplaySeverity(rowModel.highestSeverity, 'None')
     ));
     cell.appendChild(stack);

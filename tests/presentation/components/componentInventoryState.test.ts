@@ -71,6 +71,7 @@ const createRelatedVulnerability = (
 ): RelatedVulnerabilitySummary => ({
   cvssScore: 8.1,
   evidence: 'purl',
+  hydrationState: 'complete',
   id: 'GHSA-aaaa-bbbb-cccc',
   referenceCount: 2,
   severity: 'HIGH',
@@ -243,6 +244,7 @@ test('deriveComponentInventoryState counts linked vulnerabilities even when the 
   assert.equal(derived.summary.vulnerableCount, 1);
   assert.equal(derived.components[0]?.vulnerabilityCount, 1);
   assert.equal(derived.components[0]?.highestSeverity, 'high');
+  assert.equal(derived.components[0]?.hydrationState, 'complete');
   assert.deepEqual(derived.components.map((entry) => entry.component.name), ['widget']);
 });
 
@@ -426,7 +428,28 @@ test('deriveComponentInventoryState projects unknown vulnerability severity and 
 
   assert.equal(derived.components.length, 1);
   assert.equal(derived.components[0]?.highestSeverity, 'unknown');
+  assert.equal(derived.components[0]?.hydrationState, 'complete');
   assert.equal(derived.components[0]?.relatedVulnerabilities[0]?.severity, 'Unknown');
+});
+
+test('deriveComponentInventoryState projects enriching hydration state onto the displayed severity badge', () => {
+  const snapshot = createSnapshot([createComponent({
+    key: 'purl:pkg:npm/hydrating-widget@1.2.3',
+    name: 'hydrating-widget',
+    purl: 'pkg:npm/hydrating-widget@1.2.3',
+    version: '1.2.3'
+  })], undefined, [], new Map([
+    ['component-occurrence::sbom-a::component-1', [createRelatedVulnerability({
+      hydrationState: 'enriching',
+      normalizedSeverity: { rating: 'unknown', source: 'unknown' },
+      severity: 'UNKNOWN'
+    })]]
+  ]));
+
+  const derived = deriveComponentInventoryState(snapshot, createDefaultComponentInventoryFilters());
+
+  assert.equal(derived.components[0]?.highestSeverity, 'unknown');
+  assert.equal(derived.components[0]?.hydrationState, 'enriching');
 });
 
 test('filterTrackedComponents matches a component via a secondary lower-severity finding (multi-severity filtering defect)', () => {

@@ -8,6 +8,7 @@ import { VulnQueryEngine } from '../../../src/application/query/VulnQueryEngine'
 const createVulnerability = (input: Partial<Vulnerability> & Pick<Vulnerability, 'id'>): Vulnerability => ({
   affectedProducts: input.affectedProducts ?? ['demo'],
   cvssScore: input.cvssScore ?? 5,
+  hydrationState: input.hydrationState ?? 'complete',
   id: input.id,
   publishedAt: input.publishedAt ?? '2026-04-01T00:00:00.000Z',
   references: input.references ?? [],

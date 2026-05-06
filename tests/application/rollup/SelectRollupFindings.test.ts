@@ -17,7 +17,8 @@ const createVulnerability = (overrides: Partial<Vulnerability> = {}): Vulnerabil
   summary: 'Portal issue',
   title: 'Portal vulnerability',
   updatedAt: '2026-04-18T06:00:00.000Z',
-  ...overrides
+  ...overrides,
+  hydrationState: overrides.hydrationState ?? 'complete'
 });
 
 const mappedResolution: AffectedProjectResolution = {

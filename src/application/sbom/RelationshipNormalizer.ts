@@ -33,6 +33,7 @@ const compareOptionalStrings = (
   (left ?? '').localeCompare(right ?? '');
 
 export interface VulnerabilityIdentity {
+  hydrationState: Vulnerability['hydrationState'];
   id: string;
   identifiers: string[];
   notePath?: string;
@@ -42,6 +43,7 @@ export interface VulnerabilityIdentity {
 
 interface RelatedVulnerabilityIdentity extends VulnerabilityIdentity {
   cvssScore: number;
+  hydrationState: Vulnerability['hydrationState'];
   normalizedSeverity?: NormalizedSeverity;
   references: readonly string[];
   severity: string;
@@ -161,6 +163,7 @@ export class RelationshipNormalizer {
     return {
       id: vulnerability.id,
       identifiers: Array.from(identifiers).sort(compareStrings),
+      hydrationState: vulnerability.hydrationState,
       ...(notePath ? { notePath } : {}),
       ref: this.buildVulnerabilityRef(vulnerability),
       source: vulnerability.source
@@ -251,6 +254,7 @@ export class RelationshipNormalizer {
     const summary: RelatedVulnerabilitySummary = {
       cvssScore: effectiveScore ?? 0,
       evidence,
+      hydrationState: vulnerability.hydrationState,
       id: vulnerability.id,
       ...(vulnerability.normalizedSeverity ? { normalizedSeverity: vulnerability.normalizedSeverity } : {}),
       referenceCount: vulnerability.references.length,

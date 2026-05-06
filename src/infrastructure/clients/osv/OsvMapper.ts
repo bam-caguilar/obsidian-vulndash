@@ -12,6 +12,7 @@ import type {
   NormalizedSeverity,
   NormalizedSeveritySource
 } from '../../../domain/vulnerabilities/NormalizedSeverity';
+import { normalizeVulnerabilitySeverity } from '../../../domain/vulnerabilities/normalizeVulnerabilitySeverity';
 import {
   createVulnerabilitySeverityPolicy,
   type VulnerabilitySeverityPolicy
@@ -322,8 +323,12 @@ export class OsvMapper {
 
     const metadata: VulnerabilityMetadata = {};
     const cveId = identifiers.find((identifier) => identifier.toUpperCase().startsWith('CVE-'));
+    const ghsaId = identifiers.find((identifier) => identifier.toUpperCase().startsWith('GHSA-'));
     if (cveId) {
       metadata.cveId = cveId;
+    }
+    if (ghsaId) {
+      metadata.ghsaId = ghsaId;
     }
     if (identifiers.length > 0) {
       metadata.identifiers = identifiers;
@@ -349,7 +354,7 @@ export class OsvMapper {
       metadata.sourceUrls = sourceUrls;
     }
 
-    return {
+    return normalizeVulnerabilitySeverity({
       id,
       source: this.sourceName,
       title,
@@ -362,7 +367,7 @@ export class OsvMapper {
       references,
       affectedProducts,
       ...(Object.keys(metadata).length > 0 ? { metadata } : {})
-    };
+    });
   }
 
   private resolveNormalizedSeverity(
@@ -421,6 +426,16 @@ export class OsvMapper {
         candidates.push({
           ...(calculation.method ? { method: calculation.method } : {}),
           score: calculation.score,
+          source,
+          ...(calculation.vector ? { vector: calculation.vector } : {})
+        });
+        continue;
+      }
+
+      if (calculation.rating && calculation.rating !== 'unknown') {
+        candidates.push({
+          ...(calculation.method ? { method: calculation.method } : {}),
+          rating: calculation.rating,
           source,
           ...(calculation.vector ? { vector: calculation.vector } : {})
         });

@@ -39,6 +39,7 @@ const createFinding = (): RollupFinding => ({
   vulnerability: {
     affectedProducts: ['portal'],
     cvssScore: 9.1,
+    hydrationState: 'complete',
     id: 'CVE-2026-3000',
     publishedAt: '2026-04-18T08:00:00.000Z',
     references: [],
@@ -59,6 +60,7 @@ const createUnassignedFinding = (): RollupFinding => ({
   vulnerability: {
     affectedProducts: ['legacy-runtime'],
     cvssScore: 7.1,
+    hydrationState: 'complete',
     id: 'GHSA-ghgh-ghgh-ghgh',
     publishedAt: '2026-04-18T09:00:00.000Z',
     references: [],

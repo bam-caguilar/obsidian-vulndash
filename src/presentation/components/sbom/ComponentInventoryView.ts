@@ -776,6 +776,7 @@ export class ComponentInventoryView {
       component: entry.component,
       componentName: entry.component.name,
       highestSeverity: entry.highestSeverity,
+      hydrationState: entry.hydrationState,
       identifierLabel,
       isExpanded: this.expandedKeys.has(entry.component.key),
       isSelected: this.selectedComponentKey === entry.component.key,
@@ -795,6 +796,7 @@ export class ComponentInventoryView {
         identifierLabel,
         String(entry.vulnerabilityCount),
         entry.highestSeverity ?? '',
+        entry.hydrationState,
         entry.component.isEnabled ? 'enabled' : 'disabled',
         entry.component.isFollowed ? 'followed' : 'unfollowed',
         this.selectedComponentKey === entry.component.key ? 'selected' : 'unselected',
@@ -804,6 +806,7 @@ export class ComponentInventoryView {
           .map((vulnerability) => [
             vulnerability.source,
             vulnerability.id,
+            vulnerability.hydrationState,
             vulnerability.severity,
             String(vulnerability.cvssScore),
             vulnerability.normalizedSeverity?.rating ?? '',

@@ -5,6 +5,7 @@ import type {
   VulnerabilitySourceUrls
 } from '../../../domain/entities/Vulnerability';
 import { classifySeverity } from '../../../domain/value-objects/CvssScore';
+import { normalizeVulnerabilitySeverity } from '../../../domain/vulnerabilities/normalizeVulnerabilitySeverity';
 import { ProductNameNormalizer } from '../../../domain/services/ProductNameNormalizer';
 import { sanitizeMarkdown, sanitizeText, sanitizeUrl } from '../../security/sanitize';
 import type {
@@ -132,7 +133,7 @@ export class NvdMapper {
     if (vulnerableVersionRanges.length > 0) metadata.vulnerableVersionRanges = vulnerableVersionRanges;
     if (Object.keys(sourceUrls).length > 0) metadata.sourceUrls = sourceUrls;
 
-    return {
+    return normalizeVulnerabilitySeverity({
       id: cveId || 'unknown',
       source: this.sourceName,
       title: toSentenceTitle(description, cveId || 'Unknown CVE'),
@@ -144,7 +145,7 @@ export class NvdMapper {
       references: uniqueNonEmpty([nvdUrl, ...refs]),
       affectedProducts: uniqueNonEmpty(affectedProducts),
       ...(Object.keys(metadata).length > 0 ? { metadata } : {})
-    };
+    });
   }
 
   private collectCpeMatches(configurations: NonNullable<NvdCveRecord['configurations']>): NvdCpeMatch[] {

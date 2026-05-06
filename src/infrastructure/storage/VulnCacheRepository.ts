@@ -1,11 +1,12 @@
 import { buildVulnerabilityCacheKey } from '../../application/pipeline/PipelineTypes';
 import type { PipelineSnapshot } from '../../application/pipeline/PipelineTypes';
-import type { Vulnerability } from '../../domain/entities/Vulnerability';
+import type { Vulnerability, VulnerabilityInput } from '../../domain/entities/Vulnerability';
 import { normalizeVulnerabilitySeverity } from '../../domain/vulnerabilities/normalizeVulnerabilitySeverity';
 import type { IOsvQueryCache } from '../clients/osv/IOsvQueryCache';
 import { awaitTransaction, VulnCacheDb } from './VulnCacheDb';
 import {
   comparePersistedRecordsForHardCap,
+  collectPersistedVulnerabilityIdentifiers,
   createPersistedVulnerabilityRecord,
   type PersistedComponentQueryRecord,
   type PersistedVulnerabilityRecord,
@@ -13,7 +14,11 @@ import {
   VULN_CACHE_STORES
 } from './VulnCacheSchema';
 
+type VulnerabilityUpdateListener = (records: readonly PersistedVulnerabilityRecord[]) => void;
+
 export class VulnCacheRepository implements IOsvQueryCache {
+  private readonly vulnerabilityUpdateListeners = new Set<VulnerabilityUpdateListener>();
+
   public constructor(private readonly database: VulnCacheDb) {}
 
   public async count(): Promise<number> {
@@ -104,7 +109,7 @@ export class VulnCacheRepository implements IOsvQueryCache {
 
   public async replaceSourceSnapshot(
     sourceId: string,
-    vulnerabilities: readonly Vulnerability[],
+    vulnerabilities: readonly VulnerabilityInput[],
     syncedAt: string
   ): Promise<void> {
     const db = await this.database.open();
@@ -138,7 +143,7 @@ export class VulnCacheRepository implements IOsvQueryCache {
 
   public async importLegacySnapshot(
     sourceId: string,
-    vulnerabilities: readonly Vulnerability[],
+    vulnerabilities: readonly VulnerabilityInput[],
     lastSeenAt: string
   ): Promise<void> {
     const db = await this.database.open();
@@ -346,6 +351,39 @@ export class VulnCacheRepository implements IOsvQueryCache {
     return result;
   }
 
+  public onVulnerabilityUpdates(listener: VulnerabilityUpdateListener): () => void {
+    this.vulnerabilityUpdateListeners.add(listener);
+    return () => {
+      this.vulnerabilityUpdateListeners.delete(listener);
+    };
+  }
+
+  public async saveHydratedVulnerability(vulnerability: VulnerabilityInput): Promise<readonly Vulnerability[]> {
+    const normalizedVulnerability = this.normalizePersistedVulnerability(vulnerability);
+    const matchingRecords = await this.findMatchingPersistedRecords(normalizedVulnerability);
+    if (matchingRecords.length === 0) {
+      return [];
+    }
+
+    const db = await this.database.open();
+    const transaction = db.transaction(VULN_CACHE_STORES.vulnerabilities, 'readwrite');
+    const store = transaction.objectStore(VULN_CACHE_STORES.vulnerabilities);
+    const updatedRecords = matchingRecords.map((record) => {
+      const nextRecord = createPersistedVulnerabilityRecord(
+        record.sourceId,
+        normalizedVulnerability,
+        record.lastSeenAt,
+        record.createdAtMs
+      );
+      store.put(nextRecord);
+      return this.normalizePersistedRecord(nextRecord);
+    });
+
+    await awaitTransaction(transaction);
+    this.emitVulnerabilityUpdates(updatedRecords);
+    return updatedRecords.map((record) => record.vulnerability);
+  }
+
   private async awaitRequest<T>(request: IDBRequest<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       request.addEventListener('success', () => resolve(request.result));
@@ -364,7 +402,7 @@ export class VulnCacheRepository implements IOsvQueryCache {
     return values;
   }
 
-  private normalizeLoadedVulnerability(vulnerability: Vulnerability): Vulnerability {
+  private normalizeLoadedVulnerability(vulnerability: VulnerabilityInput): Vulnerability {
     return normalizeVulnerabilitySeverity(vulnerability);
   }
 
@@ -375,8 +413,73 @@ export class VulnCacheRepository implements IOsvQueryCache {
     };
   }
 
-  private normalizePersistedVulnerability(vulnerability: Vulnerability): Vulnerability {
+  private normalizePersistedVulnerability(vulnerability: VulnerabilityInput): Vulnerability {
     return this.normalizeLoadedVulnerability(vulnerability);
+  }
+
+  private emitVulnerabilityUpdates(records: readonly PersistedVulnerabilityRecord[]): void {
+    if (records.length === 0 || this.vulnerabilityUpdateListeners.size === 0) {
+      return;
+    }
+
+    for (const listener of this.vulnerabilityUpdateListeners) {
+      listener(records);
+    }
+  }
+
+  private async findMatchingPersistedRecords(vulnerability: Vulnerability): Promise<PersistedVulnerabilityRecord[]> {
+    const identifiers = collectPersistedVulnerabilityIdentifiers(vulnerability);
+    if (identifiers.length === 0) {
+      return [];
+    }
+
+    const normalizedSource = vulnerability.source.trim().toLowerCase();
+    const normalizedIdentifiers = new Set(identifiers.map((identifier) => identifier.trim().toLowerCase()));
+    const db = await this.database.open();
+    const transaction = db.transaction(VULN_CACHE_STORES.vulnerabilities, 'readonly');
+    const store = transaction.objectStore(VULN_CACHE_STORES.vulnerabilities);
+    const matches = new Map<string, PersistedVulnerabilityRecord>();
+
+    const hasIdentifierIndex = 'index' in store
+      && typeof (store as IDBObjectStore).index === 'function'
+      && typeof IDBKeyRange !== 'undefined';
+
+    if (hasIdentifierIndex) {
+      const index = (store as IDBObjectStore).index(VULN_CACHE_INDEXES.byIdentifier);
+      for (const identifier of identifiers) {
+        const records = await this.collectCursorValues(
+          index.openCursor(IDBKeyRange.only(identifier)),
+          Number.POSITIVE_INFINITY
+        );
+        for (const record of records) {
+          if (this.matchesHydrationCandidate(record, normalizedSource, normalizedIdentifiers)) {
+            matches.set(record.cacheKey, record);
+          }
+        }
+      }
+    } else {
+      const records = await this.awaitRequest(store.getAll()) as PersistedVulnerabilityRecord[];
+      for (const record of records.map((entry) => this.normalizePersistedRecord(entry))) {
+        if (this.matchesHydrationCandidate(record, normalizedSource, normalizedIdentifiers)) {
+          matches.set(record.cacheKey, record);
+        }
+      }
+    }
+
+    await awaitTransaction(transaction);
+    return Array.from(matches.values()).sort(comparePersistedRecordsForHardCap);
+  }
+
+  private matchesHydrationCandidate(
+    record: PersistedVulnerabilityRecord,
+    normalizedSource: string,
+    normalizedIdentifiers: ReadonlySet<string>
+  ): boolean {
+    if (record.vulnerability.source.trim().toLowerCase() !== normalizedSource) {
+      return false;
+    }
+
+    return record.vulnerabilityIdentifiers.some((identifier) => normalizedIdentifiers.has(identifier.trim().toLowerCase()));
   }
 
   private async listComponentQueryRecords(): Promise<PersistedComponentQueryRecord[]> {

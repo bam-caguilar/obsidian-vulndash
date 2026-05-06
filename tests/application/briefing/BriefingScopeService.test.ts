@@ -58,6 +58,7 @@ const createFinding = (overrides: Partial<RollupFinding> = {}): RollupFinding =>
   vulnerability: {
     affectedProducts: [],
     cvssScore: 9.1,
+    hydrationState: 'complete',
     id: 'CVE-2026-1111',
     publishedAt: '2026-05-04T00:00:00.000Z',
     references: [],
@@ -104,6 +105,7 @@ test('BriefingScopeService filters findings by selected project ids', () => {
       vulnerability: {
         affectedProducts: [],
         cvssScore: 7.2,
+        hydrationState: 'complete',
         id: 'CVE-2026-2222',
         publishedAt: '2026-05-04T00:00:00.000Z',
         references: [],
@@ -139,6 +141,7 @@ test('BriefingScopeService filters findings by single sbom using unmapped sbom r
       vulnerability: {
         affectedProducts: [],
         cvssScore: 5.4,
+        hydrationState: 'complete',
         id: 'CVE-2026-3333',
         publishedAt: '2026-05-04T00:00:00.000Z',
         references: [],

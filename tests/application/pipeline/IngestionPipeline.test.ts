@@ -32,7 +32,8 @@ const createVulnerability = (
   summary: `${id} summary`,
   title: `${id} title`,
   updatedAt: '2026-01-01T00:00:00.000Z',
-  ...overrides
+  ...overrides,
+  hydrationState: overrides.hydrationState ?? 'complete'
 });
 
 test('pipeline chunks large payloads and emits explicit stage events', async () => {

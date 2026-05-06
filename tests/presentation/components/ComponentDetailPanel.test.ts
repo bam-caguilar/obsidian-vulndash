@@ -35,6 +35,7 @@ const createRelatedVulnerability = (
 ): RelatedVulnerabilitySummary => ({
   cvssScore: 0,
   evidence: 'purl',
+  hydrationState: 'complete',
   id: 'CVE-2026-0001',
   referenceCount: 1,
   severity: 'HIGH',

@@ -1,4 +1,8 @@
 import type { TrackedComponent } from '../../../application/sbom/types';
+import {
+  formatDisplaySeverity,
+  getSeverityBadgeClassName
+} from '../../rendering/SeverityBadgeRenderer';
 import type { ComponentInventoryDisplayEntry } from './ComponentInventoryStore';
 import type { ComponentDetailPanelCallbacks, ComponentDetailsRenderer } from './ComponentDetailPanel';
 import { RowRenderer } from '../virtualization/RowRenderer';
@@ -12,9 +16,6 @@ export interface ComponentRowRendererCallbacks extends ComponentDetailPanelCallb
   onUnfollow: (component: TrackedComponent) => void;
   onToggleExpanded: (componentKey: string, expanded: boolean) => void;
 }
-
-const formatSeverity = (severity: string | undefined): string =>
-  severity ? `${severity.charAt(0).toUpperCase()}${severity.slice(1)}` : 'None';
 
 const uniqueValues = (values: ReadonlyArray<string | undefined>): string[] =>
   Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))));
@@ -63,8 +64,8 @@ export class ComponentRowRenderer implements RowRenderer<ComponentInventoryDispl
     const vulnStack = vulnCol.createDiv({ cls: 'vulndash-component-vuln-stack' });
     vulnStack.createSpan({ text: String(entry.vulnerabilityCount) });
     vulnStack.createSpan({
-      cls: `vulndash-severity-pill is-${entry.highestSeverity?.toLowerCase() ?? 'none'}`,
-      text: formatSeverity(entry.highestSeverity)
+      cls: getSeverityBadgeClassName(entry.highestSeverity, entry.hydrationState),
+      text: formatDisplaySeverity(entry.highestSeverity, 'None')
     });
 
     // Actions Column
@@ -140,8 +141,8 @@ export class ComponentRowRenderer implements RowRenderer<ComponentInventoryDispl
       vulnStack.empty();
       vulnStack.createSpan({ text: String(entry.vulnerabilityCount) });
       vulnStack.createSpan({
-        cls: `vulndash-severity-pill is-${entry.highestSeverity?.toLowerCase() ?? 'none'}`,
-        text: formatSeverity(entry.highestSeverity)
+        cls: getSeverityBadgeClassName(entry.highestSeverity, entry.hydrationState),
+        text: formatDisplaySeverity(entry.highestSeverity, 'None')
       });
     }
 

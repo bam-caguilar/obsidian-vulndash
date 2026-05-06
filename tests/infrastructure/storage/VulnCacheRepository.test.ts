@@ -138,6 +138,7 @@ const createComponentQueryRecord = (
 const createVulnerability = (id: string): Vulnerability => ({
   affectedProducts: [],
   cvssScore: 8.1,
+  hydrationState: 'complete',
   id,
   publishedAt: '2026-01-01T00:00:00.000Z',
   references: [`https://example.com/${id}`],
@@ -151,6 +152,7 @@ const createVulnerability = (id: string): Vulnerability => ({
 const createLegacyOsvUnknownVulnerability = (id: string): Vulnerability => ({
   affectedProducts: [],
   cvssScore: 0,
+  hydrationState: 'incomplete',
   id,
   publishedAt: '2026-01-01T00:00:00.000Z',
   references: [`https://example.com/${id}`],
@@ -255,6 +257,7 @@ test('persisted normalized severity round-trips through the vulnerability cache'
   const repository = createRepository();
   const vulnerability: Vulnerability = {
     ...createVulnerability('OSV-2026-3'),
+    hydrationState: 'complete',
     normalizedSeverity: {
       method: 'CVSS_V3',
       rating: 'high',

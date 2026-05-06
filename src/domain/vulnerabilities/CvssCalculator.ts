@@ -1,4 +1,5 @@
 import type { NormalizedSeverityMethod } from './NormalizedSeverity';
+import type { SeverityRating } from './SeverityRating';
 
 export interface CvssCalculationInput {
   readonly score: string;
@@ -7,6 +8,7 @@ export interface CvssCalculationInput {
 
 export interface CvssCalculationResult {
   readonly isSupported: boolean;
+  readonly rating?: SeverityRating;
   readonly score?: number;
   readonly vector?: string;
   readonly method?: NormalizedSeverityMethod;

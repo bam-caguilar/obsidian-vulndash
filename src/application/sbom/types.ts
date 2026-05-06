@@ -1,5 +1,6 @@
 import type { ComponentOccurrence } from '../../domain/sbom/ComponentOccurrence';
 import type { NormalizedSeverity as ResolvedSeverity } from '../../domain/vulnerabilities/NormalizedSeverity';
+import type { VulnerabilityHydrationState } from '../../domain/vulnerabilities/VulnerabilityHydrationState';
 import type { SeverityRating } from '../../domain/vulnerabilities/SeverityRating';
 import type {
   NormalizedComponent,
@@ -141,6 +142,7 @@ export interface RelatedComponentSummary {
 export interface RelatedVulnerabilitySummary {
   cvssScore: number;
   evidence: ComponentVulnerabilityLinkEvidence;
+  hydrationState: VulnerabilityHydrationState;
   id: string;
   normalizedSeverity?: ResolvedSeverity;
   referenceCount: number;

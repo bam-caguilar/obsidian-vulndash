@@ -33,6 +33,7 @@ const feeds: FeedConfig[] = [
 const createVulnerability = (id: string, source: string): Vulnerability => ({
   affectedProducts: [],
   cvssScore: 7.5,
+  hydrationState: 'complete',
   id,
   publishedAt: '2026-01-01T00:00:00.000Z',
   references: [],

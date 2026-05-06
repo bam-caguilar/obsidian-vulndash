@@ -47,7 +47,8 @@ const createVulnerability = (overrides: Partial<Vulnerability> = {}): Vulnerabil
   summary: 'Demo summary',
   title: 'Demo vulnerability',
   updatedAt: '2026-04-02T12:00:00.000Z',
-  ...overrides
+  ...overrides,
+  hydrationState: overrides.hydrationState ?? 'complete'
 });
 
 test('set triage state issues monotonic updates and join triage preserves input ordering', async () => {

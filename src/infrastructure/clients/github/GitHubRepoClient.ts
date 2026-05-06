@@ -2,6 +2,7 @@ import type { IHttpClient } from '../../../application/ports/HttpClient';
 import type { FetchVulnerabilityOptions, FetchVulnerabilityResult, VulnerabilityFeed } from '../../../application/ports/VulnerabilityFeed';
 import type { Vulnerability } from '../../../domain/entities/Vulnerability';
 import { filterVulnerabilitiesByDateWindow } from '../../../application/dashboard/PublishedDateWindow';
+import { normalizeVulnerabilitySeverity } from '../../../domain/vulnerabilities/normalizeVulnerabilitySeverity';
 import {
   createVulnerabilitySeverityPolicy,
   type VulnerabilitySeverityPolicy
@@ -149,7 +150,7 @@ export class GitHubRepoClient extends ClientBase implements VulnerabilityFeed {
     const updatedAt = advisory.updated_at ?? publishedAt;
     const source = `GitHub:${this.normalizedRepoPath}`;
 
-    return {
+    return normalizeVulnerabilitySeverity({
       id: sanitizeText(advisory.ghsa_id ?? 'unknown'),
       source,
       title: sanitizeText(advisory.summary ?? advisory.ghsa_id ?? 'GitHub Advisory'),
@@ -162,6 +163,6 @@ export class GitHubRepoClient extends ClientBase implements VulnerabilityFeed {
       references: [sanitizeUrl(advisory.html_url ?? '')].filter(Boolean),
       affectedProducts: uniqueNonEmpty((advisory.vulnerabilities ?? [])
         .map((v) => sanitizeText(v.package?.name ?? '')))
-    };
+    });
   }
 }

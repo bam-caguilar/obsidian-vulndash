@@ -31,6 +31,7 @@ const makeVulnerability = (id: string, source: string): Vulnerability => ({
   publishedAt: '2026-04-08T00:00:00.000Z',
   updatedAt: '2026-04-08T00:00:00.000Z',
   cvssScore: 7,
+  hydrationState: 'complete',
   severity: 'HIGH',
   references: [],
   affectedProducts: []
