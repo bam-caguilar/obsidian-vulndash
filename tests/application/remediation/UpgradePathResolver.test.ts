@@ -5,6 +5,18 @@ import type { NormalizedVulnerability } from '../../../src/domain/sbom/types';
 import type { KnownPatch, VulnerabilityRange } from '../../../src/domain/vulnerabilities/remediation';
 
 const resolver = new DefaultUpgradePathResolver();
+const evaluateVulnerabilityVersion = (
+  vulnerability: NormalizedVulnerability,
+  version: string
+): ReturnType<DefaultUpgradePathResolver['calculateSafestUpgrade']> | {
+  status: 'affected' | 'insufficient-data' | 'not-affected' | 'unsupported-version-scheme';
+  reason?: string;
+} => (resolver as unknown as {
+  evaluateVulnerabilityVersion: (candidate: NormalizedVulnerability, currentVersion: string) => {
+    status: 'affected' | 'insufficient-data' | 'not-affected' | 'unsupported-version-scheme';
+    reason?: string;
+  };
+}).evaluateVulnerabilityVersion(vulnerability, version);
 
 const createRange = (events: VulnerabilityRange['events']): VulnerabilityRange => ({
   events,
@@ -143,6 +155,53 @@ test('unsupported version scheme returns unsupported-version-scheme', () => {
   });
 
   assert.equal(resolution.status, 'unsupported-version-scheme');
+});
+
+test('semver not-affected plus git unsupported returns insufficient-data', () => {
+  const evaluation = evaluateVulnerabilityVersion(createVulnerability({
+    ranges: [
+      createRange([{ introduced: '0' }, { fixed: '1.0.2' }]),
+      {
+        events: [{ introduced: 'deadbeef' }],
+        type: 'GIT'
+      }
+    ]
+  }), '1.0.2');
+
+  assert.equal(evaluation.status, 'insufficient-data');
+});
+
+test('unsupported-only ranges return unsupported-version-scheme', () => {
+  const evaluation = evaluateVulnerabilityVersion(createVulnerability({
+    ranges: [{
+      events: [{ introduced: 'deadbeef' }],
+      type: 'GIT'
+    }]
+  }), '1.0.2');
+
+  assert.equal(evaluation.status, 'unsupported-version-scheme');
+});
+
+test('semver affected plus git unsupported still returns affected', () => {
+  const evaluation = evaluateVulnerabilityVersion(createVulnerability({
+    ranges: [
+      createRange([{ introduced: '0' }, { fixed: '1.0.2' }]),
+      {
+        events: [{ introduced: 'deadbeef' }],
+        type: 'GIT'
+      }
+    ]
+  }), '1.0.1');
+
+  assert.equal(evaluation.status, 'affected');
+});
+
+test('semver not-affected only returns not-affected', () => {
+  const evaluation = evaluateVulnerabilityVersion(createVulnerability({
+    ranges: [createRange([{ introduced: '0' }, { fixed: '1.0.2' }])]
+  }), '1.0.2');
+
+  assert.equal(evaluation.status, 'not-affected');
 });
 
 test('already-safe versions return already-safe', () => {
