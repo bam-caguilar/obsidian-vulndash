@@ -55,6 +55,23 @@ test('open-ended introduced range remains affected', () => {
   assert.equal(result.status, 'affected');
 });
 
+test('disjoint semver intervals evaluate each interval independently', () => {
+  const range = createRange({
+    events: [
+      { introduced: '1.0.0' },
+      { fixed: '1.2.0' },
+      { introduced: '2.0.0' },
+      { fixed: '2.3.0' }
+    ]
+  });
+
+  assert.equal(evaluator.evaluate('1.1.0', range, 'npm').status, 'affected');
+  assert.equal(evaluator.evaluate('1.5.0', range, 'npm').status, 'not-affected');
+  assert.equal(evaluator.evaluate('2.1.0', range, 'npm').status, 'affected');
+  assert.equal(evaluator.evaluate('2.4.0', range, 'npm').status, 'not-affected');
+  assert.equal(evaluator.evaluate('0.9.0', range, 'npm').status, 'not-affected');
+});
+
 test('unsupported ecosystem returns unsupported-version-scheme', () => {
   const result = evaluator.evaluate('1.2.3', createRange(), 'maven');
 
