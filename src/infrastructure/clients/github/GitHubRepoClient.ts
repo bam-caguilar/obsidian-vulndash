@@ -1,6 +1,7 @@
 import type { IHttpClient } from '../../../application/ports/HttpClient';
 import type { FetchVulnerabilityOptions, FetchVulnerabilityResult, VulnerabilityFeed } from '../../../application/ports/VulnerabilityFeed';
-import type { Vulnerability } from '../../../domain/entities/Vulnerability';
+import type { Vulnerability, VulnerabilityAffectedPackage, VulnerabilityMetadata } from '../../../domain/entities/Vulnerability';
+import { buildPackageIdentity } from '../../../domain/services/PackageIdentity';
 import { filterVulnerabilitiesByDateWindow } from '../../../application/dashboard/PublishedDateWindow';
 import { normalizeVulnerabilitySeverity } from '../../../domain/vulnerabilities/normalizeVulnerabilitySeverity';
 import {
@@ -10,6 +11,7 @@ import {
 import { sanitizeMarkdown, sanitizeText, sanitizeUrl } from '../../security/sanitize';
 import { ClientBase, type FeedSyncControls } from '../common/ClientBase';
 import { extractNextLink } from './GitHubAdvisoryClient';
+import { parseKnownPatches } from './parseKnownPatches';
 
 type GitHubRepoAdvisoryItem = {
   ghsa_id?: string;
@@ -20,7 +22,14 @@ type GitHubRepoAdvisoryItem = {
   severity?: 'low' | 'moderate' | 'high' | 'critical';
   cvss?: { score?: number };
   html_url?: string;
-  vulnerabilities?: Array<{ package?: { name?: string } }>;
+  vulnerabilities?: Array<{
+    package?: { ecosystem?: string; name?: string; purl?: string };
+    patched_versions?: string | null;
+    vulnerable_version_range?: string;
+    first_patched_version?: { identifier?: string } | null;
+    source_code_location?: string;
+    vulnerable_functions?: string[];
+  }>;
 };
 
 type GitHubRepoAdvisoryResponse = GitHubRepoAdvisoryItem[] | { items?: GitHubRepoAdvisoryItem[] };
@@ -149,6 +158,49 @@ export class GitHubRepoClient extends ClientBase implements VulnerabilityFeed {
     const publishedAt = advisory.published_at ?? new Date(0).toISOString();
     const updatedAt = advisory.updated_at ?? publishedAt;
     const source = `GitHub:${this.normalizedRepoPath}`;
+    const affectedPackages = (advisory.vulnerabilities ?? [])
+      .map((vulnerability): VulnerabilityAffectedPackage | null => {
+        const packageName = sanitizeText(vulnerability.package?.name ?? '');
+        if (!packageName) {
+          return null;
+        }
+
+        const ecosystem = sanitizeText(vulnerability.package?.ecosystem ?? '');
+        const purl = sanitizeText(vulnerability.package?.purl ?? '');
+        const vulnerableVersionRange = sanitizeText(vulnerability.vulnerable_version_range ?? '');
+        const sourcePatchedVersionsText = sanitizeText(vulnerability.patched_versions ?? '');
+        const firstPatchedVersion = sanitizeText(vulnerability.first_patched_version?.identifier ?? '');
+        const knownPatches = parseKnownPatches(vulnerability.patched_versions);
+        const packageIdentity = buildPackageIdentity({
+          ecosystem,
+          name: packageName,
+          purl
+        });
+
+        return {
+          name: packageName,
+          ...(ecosystem ? { ecosystem } : {}),
+          ...(firstPatchedVersion ? { firstPatchedVersion } : {}),
+          ...(knownPatches.length > 0 ? { knownPatches } : {}),
+          ...(packageIdentity ? { packageIdentity } : {}),
+          ...(purl ? { purl } : {}),
+          ...(sourcePatchedVersionsText ? { sourcePatchedVersionsText } : {}),
+          ...(vulnerableVersionRange ? { sourceRangeText: vulnerableVersionRange } : {}),
+          ...(vulnerableVersionRange ? { vulnerableVersionRange } : {})
+        };
+      })
+      .filter((pkg): pkg is VulnerabilityAffectedPackage => pkg !== null);
+    const packages = uniqueNonEmpty(affectedPackages.map((pkg) => pkg.name));
+    const vulnerableVersionRanges = uniqueNonEmpty(affectedPackages
+      .map((pkg) => pkg.vulnerableVersionRange ? `${pkg.name}: ${pkg.vulnerableVersionRange}` : ''));
+    const firstPatchedVersions = uniqueNonEmpty(affectedPackages
+      .map((pkg) => pkg.firstPatchedVersion ? `${pkg.name}: ${pkg.firstPatchedVersion}` : ''));
+    const metadata: VulnerabilityMetadata = {
+      ...(packages.length > 0 ? { packages } : {}),
+      ...(affectedPackages.length > 0 ? { affectedPackages } : {}),
+      ...(vulnerableVersionRanges.length > 0 ? { vulnerableVersionRanges } : {}),
+      ...(firstPatchedVersions.length > 0 ? { firstPatchedVersions } : {})
+    };
 
     return normalizeVulnerabilitySeverity({
       id: sanitizeText(advisory.ghsa_id ?? 'unknown'),
@@ -161,8 +213,8 @@ export class GitHubRepoClient extends ClientBase implements VulnerabilityFeed {
       normalizedSeverity: resolvedSeverity.normalizedSeverity,
       severity: resolvedSeverity.severity,
       references: [sanitizeUrl(advisory.html_url ?? '')].filter(Boolean),
-      affectedProducts: uniqueNonEmpty((advisory.vulnerabilities ?? [])
-        .map((v) => sanitizeText(v.package?.name ?? '')))
+      affectedProducts: packages,
+      ...(Object.keys(metadata).length > 0 ? { metadata } : {})
     });
   }
 }

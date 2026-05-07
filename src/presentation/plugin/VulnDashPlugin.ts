@@ -1513,11 +1513,13 @@ export default class VulnDashPlugin extends Plugin {
       return updated;
     });
 
-    this.invalidateComponentInventoryViews();
+    // this.invalidateComponentInventoryViews(); // we can defer this until after processing the data, which will batch multiple updates together and avoid redundant inventory view invalidations
 
     if (!didUpdateCachedVulnerabilities) {
       return;
     }
+
+    this.invalidateComponentInventoryViews();
 
     await this.processData(this.cachedVulnerabilities, {
       added: [],

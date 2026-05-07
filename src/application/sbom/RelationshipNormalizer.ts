@@ -98,7 +98,11 @@ export class RelationshipNormalizer {
       }
 
       const relatedComponent = this.toRelatedComponentSummary(component, occurrence, relationship.evidence);
-      const relatedVulnerability = this.toRelatedVulnerabilitySummary(vulnerability, relationship.evidence);
+      const relatedVulnerability = this.toRelatedVulnerabilitySummary(
+        vulnerability,
+        relationship.evidence,
+        relationship.upgradePathResolution
+      );
 
       const componentList = componentsByVulnerability.get(relationship.vulnerabilityRef) ?? [];
       componentList.push(relatedComponent);
@@ -198,6 +202,7 @@ export class RelationshipNormalizer {
       ...(relationship.sbomId ? { sbomId: relationship.sbomId.trim() } : {}),
       ...(relationship.sbomLabel ? { sbomLabel: relationship.sbomLabel.trim() } : {}),
       ...(relationship.sourcePath ? { sourcePath: relationship.sourcePath.trim() } : {}),
+      ...(relationship.upgradePathResolution ? { upgradePathResolution: relationship.upgradePathResolution } : {}),
       vulnerabilityId: relationship.vulnerabilityId.trim(),
       vulnerabilityRef: relationship.vulnerabilityRef.trim().toLowerCase(),
       vulnerabilitySource: relationship.vulnerabilitySource.trim()
@@ -244,7 +249,8 @@ export class RelationshipNormalizer {
 
   private toRelatedVulnerabilitySummary(
     vulnerability: RelatedVulnerabilityIdentity,
-    evidence: ComponentVulnerabilityLinkEvidence
+    evidence: ComponentVulnerabilityLinkEvidence,
+    upgradePathResolution?: ComponentVulnerabilityRelationship['upgradePathResolution']
   ): RelatedVulnerabilitySummary {
     const effectiveScore = vulnerability.normalizedSeverity?.score
       ?? (Number.isFinite(vulnerability.cvssScore) && vulnerability.cvssScore > 0
@@ -266,6 +272,9 @@ export class RelationshipNormalizer {
 
     if (vulnerability.notePath) {
       summary.notePath = vulnerability.notePath;
+    }
+    if (upgradePathResolution) {
+      summary.upgradePathResolution = upgradePathResolution;
     }
 
     return summary;

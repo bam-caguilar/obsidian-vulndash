@@ -1,5 +1,6 @@
 import { App, Component, MarkdownRenderer, normalizePath } from 'obsidian';
 import type { RelatedVulnerabilitySummary, TrackedComponent } from '../../../application/sbom/types';
+import type { UpgradePathResolution } from '../../../domain/vulnerabilities/remediation';
 import { sanitizeText, sanitizeUrl } from '../../../infrastructure/security/sanitize';
 import {
   formatDisplaySeverity,
@@ -26,6 +27,7 @@ interface RenderableRelatedVulnerability {
   refs?: string | undefined;
   evidence?: string | undefined;
   notePath?: string | undefined;
+  upgradePathResolution?: UpgradePathResolution | undefined;
 }
 
 interface RenderableEmbeddedVulnerability {
@@ -189,7 +191,8 @@ export class ComponentDetailsRenderer extends Component {
           summary: this.toSafeText(vulnerability.title, ''),
           refs: `${this.toNonNegativeInteger(vulnerability.referenceCount)} reference${vulnerability.referenceCount === 1 ? '' : 's'}`,
           evidence: this.toSafeText(vulnerability.evidence, ''),
-          notePath: this.toSafeText(vulnerability.notePath, '')
+          notePath: this.toSafeText(vulnerability.notePath, ''),
+          upgradePathResolution: vulnerability.upgradePathResolution
         }));
 
       const embeddedToRender: RenderableEmbeddedVulnerability[] = embeddedOnlyVulnerabilities
@@ -320,6 +323,10 @@ export class ComponentDetailsRenderer extends Component {
       }
     }
 
+    if ('upgradePathResolution' in vulnerability && vulnerability.upgradePathResolution) {
+      lines.push(...this.buildUpgradePathLines(vulnerability.upgradePathResolution));
+    }
+
     if ('sourceUrl' in vulnerability && vulnerability.sourceUrl) {
       const safeUrl = sanitizeUrl(vulnerability.sourceUrl);
       if (safeUrl) {
@@ -410,5 +417,46 @@ export class ComponentDetailsRenderer extends Component {
 
   private escapeInlineCode(value: string): string {
     return value.replace(/`/g, '\\`');
+  }
+
+  private buildUpgradePathLines(resolution: UpgradePathResolution): string[] {
+    const lines: string[] = [];
+
+    switch (resolution.status) {
+      case 'resolved':
+        lines.push(`- **Remediation:** Safest upgrade: \`${this.escapeInlineCode(this.toSafeText(resolution.recommendedUpgradeVersion, 'Unknown'))}\``);
+        break;
+      case 'already-safe':
+        lines.push(`- **Remediation:** Current version is not affected by this advisory.`);
+        break;
+      case 'insufficient-data':
+        lines.push(`- **Remediation:** No safe upgrade recommendation is available from the current advisory data.`);
+        break;
+      case 'unsupported-version-scheme':
+        lines.push(`- **Remediation:** Upgrade recommendation unavailable because this package uses an unsupported version scheme.`);
+        break;
+      case 'unresolved':
+      default:
+        lines.push(`- **Remediation:** No safe known patch found.`);
+        break;
+    }
+
+    if (resolution.diagnostics?.length) {
+      lines.push(`- **Remediation Diagnostics:** ${this.escapeMd(resolution.diagnostics.join(' | '))}`);
+    }
+
+    if (resolution.rejectedCandidates.length > 0) {
+      const rejected = resolution.rejectedCandidates
+        .map((candidate) => {
+          const blockedBy = candidate.blockingVulnerabilityId
+            ? ` blocked by ${candidate.blockingVulnerabilityId}`
+            : '';
+          return `\`${this.escapeInlineCode(candidate.version)}\` (${this.escapeMd(candidate.reason)}${this.escapeMd(blockedBy)})`;
+        })
+        .join(', ');
+      lines.push(`- **Rejected Candidates:** ${rejected}`);
+    }
+
+    return lines;
   }
 }

@@ -44,6 +44,33 @@ test('falls back to cpe and then normalized name/version when identifiers are mi
   assert.equal(nameVersionKey, 'name-version:example component@1.0.0');
 });
 
+test('preserves component separator semantics when normalizing names', () => {
+  const hyphenKey = service.getCanonicalKey(createComponent({
+    name: 'node-fetch',
+    version: '1.0.0'
+  }));
+  const underscoreKey = service.getCanonicalKey(createComponent({
+    name: 'node_fetch',
+    version: '1.0.0'
+  }));
+  const dotKey = service.getCanonicalKey(createComponent({
+    name: 'node.fetch',
+    version: '1.0.0'
+  }));
+
+  assert.equal(hyphenKey, 'name-version:node-fetch@1.0.0');
+  assert.equal(underscoreKey, 'name-version:node_fetch@1.0.0');
+  assert.equal(dotKey, 'name-version:node.fetch@1.0.0');
+  assert.notEqual(hyphenKey, underscoreKey);
+  assert.notEqual(hyphenKey, dotKey);
+  assert.notEqual(underscoreKey, dotKey);
+});
+
+test('normalizes component names with trim and lowercase only', () => {
+  assert.equal(service.normalizeComponentNameValue('  Example Component  '), 'example component');
+  assert.equal(service.normalizeComponentNameValue('MiXeD Case'), 'mixed case');
+});
+
 test('treats parser placeholder names as unresolved instead of durable keys', () => {
   const key = service.getCanonicalKey(createComponent({
     license: 'MIT',

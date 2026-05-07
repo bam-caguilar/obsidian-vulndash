@@ -86,3 +86,23 @@ test('ComponentDetailsRenderer renders unknown severity without a score', () => 
   assert.ok(markdown.includes('**Severity:** Unknown'), 'Unknown severity must render as Unknown');
   assert.ok(!markdown.includes('**Score:**'), 'Score line must not appear for unknown severity without a score');
 });
+
+test('ComponentDetailsRenderer renders upgrade path diagnostics from the view model without local evaluation logic', () => {
+  const vulnerability = createRelatedVulnerability({
+    id: 'GHSA-remediation',
+    upgradePathResolution: {
+      recommendedUpgradeVersion: '1.0.4',
+      rejectedCandidates: [{
+        blockingVulnerabilityId: 'GHSA-sibling',
+        reason: 'GHSA-sibling still affects version 1.0.2.',
+        version: '1.0.2'
+      }],
+      status: 'resolved'
+    }
+  });
+
+  const markdown = buildMarkdown(renderer, createComponent(), { relatedVulnerabilities: [vulnerability] });
+  assert.ok(markdown.includes('Safest upgrade: `1.0.4`'));
+  assert.ok(markdown.includes('Rejected Candidates'));
+  assert.ok(markdown.includes('GHSA-sibling'));
+});

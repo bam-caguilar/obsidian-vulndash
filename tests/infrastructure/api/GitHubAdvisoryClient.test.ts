@@ -76,6 +76,7 @@ test('normalizes GitHub advisory package and identifier metadata', async () => {
           cwes: [{ cwe_id: 'CWE-79', name: 'Cross-site Scripting' }],
           vulnerabilities: [{
             package: { ecosystem: 'npm', name: '@acme/widget' },
+            patched_versions: '1.2.3, 1.2.5',
             vulnerable_version_range: '< 1.2.3',
             first_patched_version: { identifier: '1.2.3' },
             vulnerable_functions: ['parseWidget', 'parseWidget'],
@@ -101,9 +102,139 @@ test('normalizes GitHub advisory package and identifier metadata', async () => {
   assert.deepEqual(vulnerability?.metadata?.firstPatchedVersions, ['@acme/widget: 1.2.3']);
   assert.deepEqual(vulnerability?.metadata?.vulnerableFunctions, ['parseWidget']);
   assert.equal(vulnerability?.metadata?.affectedPackages?.[0]?.ecosystem, 'npm');
+  assert.equal(vulnerability?.metadata?.affectedPackages?.[0]?.packageIdentity, 'npm:@acme/widget');
+  assert.deepEqual(vulnerability?.metadata?.affectedPackages?.[0]?.knownPatches, [
+    { source: 'GHSA', sourceText: '1.2.3, 1.2.5', version: '1.2.3' },
+    { source: 'GHSA', sourceText: '1.2.3, 1.2.5', version: '1.2.5' }
+  ]);
+  assert.equal(vulnerability?.metadata?.affectedPackages?.[0]?.sourceRangeText, '< 1.2.3');
+  assert.equal(vulnerability?.metadata?.affectedPackages?.[0]?.sourcePatchedVersionsText, '1.2.3, 1.2.5');
   assert.equal(vulnerability?.metadata?.affectedPackages?.[0]?.sourceCodeLocation, 'https://github.com/acme/widget');
   assert.ok(vulnerability?.references.includes('https://github.com/advisories/GHSA-aaaa-bbbb-cccc'));
   assert.ok(vulnerability?.references.includes('https://example.com/advisory'));
+});
+
+test('preserves GitHub advisory source range text when patched_versions is null', async () => {
+  const httpClient: IHttpClient = {
+    async getJson() {
+      return {
+        status: 200,
+        headers: {},
+        data: [{
+          ghsa_id: 'GHSA-null-patch',
+          summary: 'Sample',
+          description: 'desc',
+          published_at: '2026-01-01T00:00:00.000Z',
+          updated_at: '2026-01-02T00:00:00.000Z',
+          vulnerabilities: [{
+            package: { ecosystem: 'npm', name: '@acme/widget' },
+            patched_versions: null,
+            vulnerable_version_range: '< 2.0.0'
+          }]
+        }]
+      } as HttpResponse<never>;
+    }
+  };
+
+  const client = new GitHubAdvisoryClient(httpClient, 'github-advisories-default', 'GitHub', '', controls);
+  const result = await client.fetchVulnerabilities({ signal: new AbortController().signal });
+  const affectedPackage = result.vulnerabilities[0]?.metadata?.affectedPackages?.[0];
+
+  assert.equal(affectedPackage?.sourceRangeText, '< 2.0.0');
+  assert.equal(affectedPackage?.sourcePatchedVersionsText, undefined);
+  assert.equal(affectedPackage?.knownPatches, undefined);
+});
+
+test('uses first_patched_version as the authoritative first patched version', async () => {
+  const httpClient: IHttpClient = {
+    async getJson() {
+      return {
+        status: 200,
+        headers: {},
+        data: [{
+          ghsa_id: 'GHSA-authoritative-patch',
+          summary: 'Sample',
+          description: 'desc',
+          published_at: '2026-01-01T00:00:00.000Z',
+          updated_at: '2026-01-02T00:00:00.000Z',
+          vulnerabilities: [{
+            package: { ecosystem: 'npm', name: '@acme/widget' },
+            patched_versions: '2.0.0, 1.5.0',
+            first_patched_version: { identifier: '1.5.0' }
+          }]
+        }]
+      } as HttpResponse<never>;
+    }
+  };
+
+  const client = new GitHubAdvisoryClient(httpClient, 'github-advisories-default', 'GitHub', '', controls);
+  const result = await client.fetchVulnerabilities({ signal: new AbortController().signal });
+  const affectedPackage = result.vulnerabilities[0]?.metadata?.affectedPackages?.[0];
+
+  assert.equal(affectedPackage?.firstPatchedVersion, '1.5.0');
+  assert.deepEqual(result.vulnerabilities[0]?.metadata?.firstPatchedVersions, ['@acme/widget: 1.5.0']);
+});
+
+test('does not infer first patched version from out-of-order patched_versions', async () => {
+  const httpClient: IHttpClient = {
+    async getJson() {
+      return {
+        status: 200,
+        headers: {},
+        data: [{
+          ghsa_id: 'GHSA-missing-first-patch',
+          summary: 'Sample',
+          description: 'desc',
+          published_at: '2026-01-01T00:00:00.000Z',
+          updated_at: '2026-01-02T00:00:00.000Z',
+          vulnerabilities: [{
+            package: { ecosystem: 'npm', name: '@acme/widget' },
+            patched_versions: '2.0.0, 1.5.0'
+          }]
+        }]
+      } as HttpResponse<never>;
+    }
+  };
+
+  const client = new GitHubAdvisoryClient(httpClient, 'github-advisories-default', 'GitHub', '', controls);
+  const result = await client.fetchVulnerabilities({ signal: new AbortController().signal });
+  const affectedPackage = result.vulnerabilities[0]?.metadata?.affectedPackages?.[0];
+
+  assert.equal(affectedPackage?.firstPatchedVersion, undefined);
+  assert.equal(result.vulnerabilities[0]?.metadata?.firstPatchedVersions, undefined);
+  assert.deepEqual(affectedPackage?.knownPatches, [
+    { source: 'GHSA', sourceText: '2.0.0, 1.5.0', version: '2.0.0' },
+    { source: 'GHSA', sourceText: '2.0.0, 1.5.0', version: '1.5.0' }
+  ]);
+});
+
+test('drops invalid patched_versions while leaving first patched version unset', async () => {
+  const httpClient: IHttpClient = {
+    async getJson() {
+      return {
+        status: 200,
+        headers: {},
+        data: [{
+          ghsa_id: 'GHSA-invalid-patch-list',
+          summary: 'Sample',
+          description: 'desc',
+          published_at: '2026-01-01T00:00:00.000Z',
+          updated_at: '2026-01-02T00:00:00.000Z',
+          vulnerabilities: [{
+            package: { ecosystem: 'npm', name: '@acme/widget' },
+            patched_versions: '1.2.3, bad-version'
+          }]
+        }]
+      } as HttpResponse<never>;
+    }
+  };
+
+  const client = new GitHubAdvisoryClient(httpClient, 'github-advisories-default', 'GitHub', '', controls);
+  const result = await client.fetchVulnerabilities({ signal: new AbortController().signal });
+  const affectedPackage = result.vulnerabilities[0]?.metadata?.affectedPackages?.[0];
+
+  assert.equal(affectedPackage?.firstPatchedVersion, undefined);
+  assert.equal(affectedPackage?.knownPatches, undefined);
 });
 
 test('maps incremental cursor to GitHub updated filter', async () => {

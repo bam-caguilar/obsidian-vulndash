@@ -1,4 +1,9 @@
 import type { NormalizedSeverity as ResolvedSeverity } from '../vulnerabilities/NormalizedSeverity';
+import type {
+  KnownPatch,
+  UpgradePathResolution,
+  VulnerabilityRange
+} from '../vulnerabilities/remediation';
 
 export type NormalizedSbomFormat = 'cyclonedx' | 'spdx';
 
@@ -28,13 +33,21 @@ export interface NormalizedVulnerability {
   id: string;
   bomRef?: string;
   description?: string;
+  ecosystem?: string;
+  knownPatches?: KnownPatch[];
   method?: string;
   normalizedSeverity?: ResolvedSeverity;
+  packageIdentity?: string;
+  packageName?: string;
   published?: string;
+  ranges?: VulnerabilityRange[];
   score?: number;
   severity?: NormalizedSeverity;
   sourceName?: string;
+  sourcePatchedVersionsText?: string;
+  sourceRangeText?: string;
   sourceUrl?: string;
+  upgradePathResolution?: UpgradePathResolution;
   updated?: string;
   vector?: string;
 }

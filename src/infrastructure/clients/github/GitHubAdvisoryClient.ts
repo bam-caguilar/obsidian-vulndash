@@ -7,6 +7,7 @@ import type {
   VulnerabilityMetadata,
   VulnerabilitySourceUrls
 } from '../../../domain/entities/Vulnerability';
+import { buildPackageIdentity } from '../../../domain/services/PackageIdentity';
 import { filterVulnerabilitiesByDateWindow } from '../../../application/dashboard/PublishedDateWindow';
 import { normalizeVulnerabilitySeverity } from '../../../domain/vulnerabilities/normalizeVulnerabilitySeverity';
 import {
@@ -15,6 +16,7 @@ import {
 } from '../../../domain/vulnerabilities/VulnerabilitySeverityPolicy';
 import { sanitizeMarkdown, sanitizeText, sanitizeUrl } from '../../security/sanitize';
 import { ClientBase, type FeedSyncControls } from '../common/ClientBase';
+import { parseKnownPatches } from './parseKnownPatches';
 
 export type GitHubAdvisoryItem = {
   ghsa_id?: string;
@@ -33,7 +35,8 @@ export type GitHubAdvisoryItem = {
   references?: string[];
   cwes?: Array<{ cwe_id?: string; name?: string }>;
   vulnerabilities?: Array<{
-    package?: { ecosystem?: string; name?: string };
+    package?: { ecosystem?: string; name?: string; purl?: string };
+    patched_versions?: string | null;
     vulnerable_version_range?: string;
     first_patched_version?: { identifier?: string } | null;
     vulnerable_functions?: string[];
@@ -259,20 +262,33 @@ export class GitHubAdvisoryClient extends ClientBase implements VulnerabilityFee
         }
 
         const ecosystem = sanitizeText(vulnerability.package?.ecosystem ?? '');
+        const purl = sanitizeText(vulnerability.package?.purl ?? '');
         const sourceCodeLocation = sanitizeUrl(vulnerability.source_code_location ?? advisory.source_code_location ?? '');
         const vulnerableVersionRange = sanitizeText(vulnerability.vulnerable_version_range ?? '');
+        const sourcePatchedVersionsText = sanitizeText(vulnerability.patched_versions ?? '');
         const firstPatchedVersion = sanitizeText(vulnerability.first_patched_version?.identifier ?? '');
         const vulnerableFunctions = uniqueNonEmpty((vulnerability.vulnerable_functions ?? [])
           .map((vulnerableFunction) => sanitizeText(vulnerableFunction)));
         const vendor = sanitizeText(deriveVendor(packageName, sourceCodeLocation));
+        const knownPatches = parseKnownPatches(vulnerability.patched_versions);
+        const packageIdentity = buildPackageIdentity({
+          ecosystem,
+          name: packageName,
+          purl
+        });
 
         return {
           name: packageName,
           ...(ecosystem ? { ecosystem } : {}),
+          ...(firstPatchedVersion ? { firstPatchedVersion } : {}),
+          ...(knownPatches.length > 0 ? { knownPatches } : {}),
+          ...(packageIdentity ? { packageIdentity } : {}),
+          ...(purl ? { purl } : {}),
+          ...(sourcePatchedVersionsText ? { sourcePatchedVersionsText } : {}),
+          ...(vulnerableVersionRange ? { sourceRangeText: vulnerableVersionRange } : {}),
           ...(vendor ? { vendor } : {}),
           ...(sourceCodeLocation ? { sourceCodeLocation } : {}),
           ...(vulnerableVersionRange ? { vulnerableVersionRange } : {}),
-          ...(firstPatchedVersion ? { firstPatchedVersion } : {}),
           ...(vulnerableFunctions.length > 0 ? { vulnerableFunctions } : {})
         };
       })
