@@ -942,6 +942,10 @@
   background: color-mix(in srgb, var(--background-modifier-hover) 78%, var(--background-primary));
 }
 
+.vulndash-component-virtual-table-root .vulndash-component-row:hover > .vulndash-col {
+  background: color-mix(in srgb, var(--background-modifier-hover) 78%, var(--background-primary));
+}
+
 .vulndash-component-details-row > td {
   padding: 0;
   background: var(--background-secondary);
@@ -960,6 +964,10 @@
 }
 
 .vulndash-component-row.is-selected > td {
+  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
+}
+
+.vulndash-component-virtual-table-root .vulndash-component-row.is-selected > .vulndash-col {
   background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
 }
 
@@ -1053,6 +1061,53 @@
   font-family: var(--font-monospace);
   font-size: var(--font-ui-smaller);
   word-break: break-word;
+}
+
+.vulndash-component-remediation-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.7rem;
+  padding: 0.18rem 0.58rem;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: var(--background-primary-alt);
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  line-height: 1.2;
+  max-width: 100%;
+}
+
+.vulndash-component-remediation-chip.is-resolved {
+  color: var(--text-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--interactive-accent) 26%, transparent);
+}
+
+.vulndash-component-remediation-chip.is-already-safe {
+  color: var(--text-success, #15803d);
+  background: color-mix(in srgb, var(--color-green, #22c55e) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-green, #22c55e) 28%, transparent);
+}
+
+.vulndash-component-remediation-chip.is-unresolved {
+  color: var(--text-warning, #b54708);
+  background: color-mix(in srgb, var(--color-orange, #f59e0b) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-orange, #f59e0b) 28%, transparent);
+}
+
+.vulndash-component-remediation-chip.is-insufficient-data,
+.vulndash-component-remediation-chip.is-not-available {
+  color: var(--text-muted);
+  background: var(--background-primary-alt);
+  border-color: var(--background-modifier-border);
+}
+
+.vulndash-component-remediation-chip.is-unsupported-version-scheme {
+  color: var(--text-normal);
+  background: color-mix(in srgb, var(--color-cyan, #06b6d4) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-cyan, #06b6d4) 22%, transparent);
 }
 
 .vulndash-severity-pill {
@@ -1416,6 +1471,10 @@
   overflow: hidden;
 }
 
+.vulndash-component-virtual-table-root {
+  overflow: auto;
+}
+
 /* ==========================================================================
    13. VIRTUAL TABLE LAYOUT (FLEXBOX COLUMNS)
    ========================================================================== */
@@ -1455,11 +1514,29 @@
 
 .vulndash-component-table .vulndash-component-col-version { width: 8%; } /* Version */
 
-.vulndash-component-table .vulndash-component-col-identifier { width: 20%; } /* PURL */
+.vulndash-component-table .vulndash-component-col-identifier { width: 16%; } /* PURL */
 
-.vulndash-component-table .vulndash-component-col-vulnerabilities { width: 12%; }  /* Vulnerabilities */
+.vulndash-component-table .vulndash-component-col-vulnerabilities { width: 10%; }  /* Vulnerabilities */
 
-.vulndash-component-table .vulndash-component-col-actions { width: 16%; } /* Actions */
+.vulndash-component-table .vulndash-component-col-remediation { width: 10%; } /* Remediation */
+
+.vulndash-component-table .vulndash-component-col-actions { width: 12%; } /* Actions */
+
+.vulndash-component-virtual-table-root .vulndash-component-col-project { flex: 0 0 10%; }
+
+.vulndash-component-virtual-table-root .vulndash-component-col-sbom { flex: 0 0 16%; }
+
+.vulndash-component-virtual-table-root .vulndash-component-col-name { flex: 0 0 18%; }
+
+.vulndash-component-virtual-table-root .vulndash-component-col-version { flex: 0 0 8%; }
+
+.vulndash-component-virtual-table-root .vulndash-component-col-identifier { flex: 0 0 16%; }
+
+.vulndash-component-virtual-table-root .vulndash-component-col-vulnerabilities { flex: 0 0 10%; }
+
+.vulndash-component-virtual-table-root .vulndash-component-col-remediation { flex: 0 0 10%; }
+
+.vulndash-component-virtual-table-root .vulndash-component-col-actions { flex: 0 0 12%; }
 
 
 /* VULNERABILITY TABLE WIDTHS */
