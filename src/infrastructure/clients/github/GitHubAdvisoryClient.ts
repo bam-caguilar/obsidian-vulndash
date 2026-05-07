@@ -7,6 +7,8 @@ import type {
   VulnerabilityMetadata,
   VulnerabilitySourceUrls
 } from '../../../domain/entities/Vulnerability';
+import { buildPackageIdentity } from '../../../domain/services/PackageIdentity';
+import type { KnownPatch } from '../../../domain/vulnerabilities/remediation';
 import { filterVulnerabilitiesByDateWindow } from '../../../application/dashboard/PublishedDateWindow';
 import { normalizeVulnerabilitySeverity } from '../../../domain/vulnerabilities/normalizeVulnerabilitySeverity';
 import {
@@ -33,7 +35,8 @@ export type GitHubAdvisoryItem = {
   references?: string[];
   cwes?: Array<{ cwe_id?: string; name?: string }>;
   vulnerabilities?: Array<{
-    package?: { ecosystem?: string; name?: string };
+    package?: { ecosystem?: string; name?: string; purl?: string };
+    patched_versions?: string | null;
     vulnerable_version_range?: string;
     first_patched_version?: { identifier?: string } | null;
     vulnerable_functions?: string[];
@@ -72,6 +75,30 @@ const deriveVendor = (packageName: string, sourceCodeLocation: string): string =
 
   const githubMatch = sourceCodeLocation.match(/^https?:\/\/(?:www\.)?github\.com\/([^/\s]+)/i);
   return githubMatch?.[1] ?? '';
+};
+
+const SAFE_PATCH_VERSION_PATTERN = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
+const parseKnownPatches = (patchedVersions: string | null | undefined): KnownPatch[] => {
+  const normalized = sanitizeText(patchedVersions ?? '');
+  if (!normalized) {
+    return [];
+  }
+
+  const candidates = normalized
+    .split(',')
+    .map((candidate) => sanitizeText(candidate))
+    .filter((candidate) => candidate.length > 0);
+
+  if (candidates.length === 0 || candidates.some((candidate) => !SAFE_PATCH_VERSION_PATTERN.test(candidate))) {
+    return [];
+  }
+
+  return uniqueNonEmpty(candidates).map((version) => ({
+    source: 'GHSA' as const,
+    sourceText: normalized,
+    version
+  }));
 };
 
 export const extractNextLink = (linkHeader: string | undefined): string | undefined => {
@@ -259,20 +286,33 @@ export class GitHubAdvisoryClient extends ClientBase implements VulnerabilityFee
         }
 
         const ecosystem = sanitizeText(vulnerability.package?.ecosystem ?? '');
+        const purl = sanitizeText(vulnerability.package?.purl ?? '');
         const sourceCodeLocation = sanitizeUrl(vulnerability.source_code_location ?? advisory.source_code_location ?? '');
         const vulnerableVersionRange = sanitizeText(vulnerability.vulnerable_version_range ?? '');
+        const sourcePatchedVersionsText = sanitizeText(vulnerability.patched_versions ?? '');
         const firstPatchedVersion = sanitizeText(vulnerability.first_patched_version?.identifier ?? '');
         const vulnerableFunctions = uniqueNonEmpty((vulnerability.vulnerable_functions ?? [])
           .map((vulnerableFunction) => sanitizeText(vulnerableFunction)));
         const vendor = sanitizeText(deriveVendor(packageName, sourceCodeLocation));
+        const knownPatches = parseKnownPatches(vulnerability.patched_versions);
+        const packageIdentity = buildPackageIdentity({
+          ecosystem,
+          name: packageName,
+          purl
+        });
 
         return {
           name: packageName,
           ...(ecosystem ? { ecosystem } : {}),
+          ...(firstPatchedVersion ? { firstPatchedVersion } : knownPatches[0]?.version ? { firstPatchedVersion: knownPatches[0].version } : {}),
+          ...(knownPatches.length > 0 ? { knownPatches } : {}),
+          ...(packageIdentity ? { packageIdentity } : {}),
+          ...(purl ? { purl } : {}),
+          ...(sourcePatchedVersionsText ? { sourcePatchedVersionsText } : {}),
+          ...(vulnerableVersionRange ? { sourceRangeText: vulnerableVersionRange } : {}),
           ...(vendor ? { vendor } : {}),
           ...(sourceCodeLocation ? { sourceCodeLocation } : {}),
           ...(vulnerableVersionRange ? { vulnerableVersionRange } : {}),
-          ...(firstPatchedVersion ? { firstPatchedVersion } : {}),
           ...(vulnerableFunctions.length > 0 ? { vulnerableFunctions } : {})
         };
       })

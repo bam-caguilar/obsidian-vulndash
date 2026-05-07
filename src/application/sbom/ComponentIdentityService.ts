@@ -16,7 +16,11 @@ const normalizeComponentName = (value: string | undefined): string | undefined =
     return undefined;
   }
 
-  const normalized = normalizeToken(value);
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[-_.]+/g, ' ')
+    .replace(/\s+/g, ' ');
   if (!normalized || UNNAMED_COMPONENT_PATTERN.test(normalized)) {
     return undefined;
   }

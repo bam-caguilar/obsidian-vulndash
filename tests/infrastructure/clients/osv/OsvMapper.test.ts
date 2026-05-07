@@ -319,9 +319,86 @@ test('OSV mapper marks missing severity as unknown instead of blank', () => {
   });
 
   assert.equal(vulnerability.cvssScore, 0);
-  assert.equal(vulnerability.severity, 'NONE');
+  assert.equal(vulnerability.severity, 'UNKNOWN');
   assert.deepEqual(vulnerability.normalizedSeverity, {
     rating: 'unknown',
     source: 'unknown'
   });
+});
+
+test('OSV mapper preserves structured range events and multiple fixed versions for remediation', () => {
+  const mapper = new OsvMapper('OSV');
+
+  const vulnerability = mapper.normalize({
+    affected: [{
+      package: {
+        ecosystem: 'npm',
+        name: 'widget',
+        purl: 'pkg:npm/widget@1.0.0'
+      },
+      ranges: [
+        {
+          type: 'ECOSYSTEM',
+          events: [
+            { introduced: '0' },
+            { fixed: '1.0.2' },
+            { introduced: '1.1.0' },
+            { fixed: '1.1.3' }
+          ]
+        }
+      ]
+    }],
+    id: 'OSV-2026-remediation-1',
+    modified: '2026-04-22T00:00:00.000Z',
+    summary: 'Multiple fixed versions'
+  });
+
+  assert.equal(vulnerability.metadata?.affectedPackages?.[0]?.packageIdentity, 'pkg:npm/widget');
+  assert.deepEqual(vulnerability.metadata?.affectedPackages?.[0]?.ranges, [{
+    events: [
+      { introduced: '0' },
+      { fixed: '1.0.2' },
+      { introduced: '1.1.0' },
+      { fixed: '1.1.3' }
+    ],
+    type: 'ECOSYSTEM'
+  }]);
+  assert.deepEqual(vulnerability.metadata?.affectedPackages?.[0]?.knownPatches, [
+    { source: 'OSV', version: '1.0.2' },
+    { source: 'OSV', version: '1.1.3' }
+  ]);
+});
+
+test('OSV mapper does not invent patches from last_affected boundaries', () => {
+  const mapper = new OsvMapper('OSV');
+
+  const vulnerability = mapper.normalize({
+    affected: [{
+      package: {
+        ecosystem: 'npm',
+        name: 'widget'
+      },
+      ranges: [
+        {
+          type: 'ECOSYSTEM',
+          events: [
+            { introduced: '0' },
+            { last_affected: '1.0.9' }
+          ]
+        }
+      ]
+    }],
+    id: 'OSV-2026-remediation-2',
+    modified: '2026-04-22T00:00:00.000Z',
+    summary: 'Last affected only'
+  });
+
+  assert.deepEqual(vulnerability.metadata?.affectedPackages?.[0]?.ranges, [{
+    events: [
+      { introduced: '0' },
+      { lastAffected: '1.0.9' }
+    ],
+    type: 'ECOSYSTEM'
+  }]);
+  assert.equal(vulnerability.metadata?.affectedPackages?.[0]?.knownPatches, undefined);
 });

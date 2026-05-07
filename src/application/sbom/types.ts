@@ -1,5 +1,6 @@
 import type { ComponentOccurrence } from '../../domain/sbom/ComponentOccurrence';
 import type { NormalizedSeverity as ResolvedSeverity } from '../../domain/vulnerabilities/NormalizedSeverity';
+import type { UpgradePathResolution } from '../../domain/vulnerabilities/remediation';
 import type { VulnerabilityHydrationState } from '../../domain/vulnerabilities/VulnerabilityHydrationState';
 import type { SeverityRating } from '../../domain/vulnerabilities/SeverityRating';
 import type {
@@ -115,6 +116,7 @@ export interface ComponentVulnerabilityRelationship {
   sbomId?: string;
   sbomLabel?: string;
   sourcePath?: string;
+  upgradePathResolution?: UpgradePathResolution;
   vulnerabilityId: string;
   vulnerabilityRef: string;
   vulnerabilitySource: string;
@@ -151,6 +153,7 @@ export interface RelatedVulnerabilitySummary {
   source: string;
   title: string;
   notePath?: string;
+  upgradePathResolution?: UpgradePathResolution;
 }
 
 export interface ComponentRelationshipGraph {

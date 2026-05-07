@@ -5,6 +5,7 @@ import type {
   VulnerabilityMetadata,
   VulnerabilitySourceUrls
 } from '../../../domain/entities/Vulnerability';
+import { buildPackageIdentity } from '../../../domain/services/PackageIdentity';
 import { resolveSeverityRating } from '../../../domain/vulnerabilities/SeverityRating';
 import { PurlNormalizer } from '../../../domain/services/PurlNormalizer';
 import type { CvssCalculator } from '../../../domain/vulnerabilities/CvssCalculator';
@@ -12,6 +13,12 @@ import type {
   NormalizedSeverity,
   NormalizedSeveritySource
 } from '../../../domain/vulnerabilities/NormalizedSeverity';
+import type {
+  KnownPatch,
+  VulnerabilityRange,
+  VulnerabilityRangeEvent,
+  VulnerabilityRangeType
+} from '../../../domain/vulnerabilities/remediation';
 import { normalizeVulnerabilitySeverity } from '../../../domain/vulnerabilities/normalizeVulnerabilitySeverity';
 import {
   createVulnerabilitySeverityPolicy,
@@ -182,6 +189,65 @@ const buildVersionRange = (affected: OsvAffectedPayload): string | undefined => 
   return undefined;
 };
 
+const normalizeRangeType = (value: string | undefined): VulnerabilityRangeType | undefined => {
+  const normalized = sanitizeText(value ?? '').toUpperCase();
+  switch (normalized) {
+    case 'SEMVER':
+    case 'ECOSYSTEM':
+    case 'GIT':
+      return normalized;
+    default:
+      return undefined;
+  }
+};
+
+const buildRangeEvents = (affected: OsvAffectedPayload): VulnerabilityRange[] =>
+  (affected.ranges ?? [])
+    .map((range) => {
+      const type = normalizeRangeType(range.type);
+      if (!type) {
+        return null;
+      }
+
+      const events = range.events
+        .map((event) => {
+          const rangeEvent: VulnerabilityRangeEvent = {
+            ...(sanitizeText(event.introduced ?? '') ? { introduced: sanitizeText(event.introduced ?? '') } : {}),
+            ...(sanitizeText(event.fixed ?? '') ? { fixed: sanitizeText(event.fixed ?? '') } : {}),
+            ...(sanitizeText(event.last_affected ?? '') ? { lastAffected: sanitizeText(event.last_affected ?? '') } : {}),
+            ...(sanitizeText(event.limit ?? '') ? { limit: sanitizeText(event.limit ?? '') } : {})
+          };
+
+          return Object.keys(rangeEvent).length > 0 ? rangeEvent : null;
+        })
+        .filter((event): event is VulnerabilityRangeEvent => event !== null);
+
+      if (events.length === 0) {
+        return null;
+      }
+
+      const normalizedRange: VulnerabilityRange = {
+        type,
+        events
+      };
+
+      const repo = sanitizeText(range.repo ?? '');
+      if (repo) {
+        normalizedRange.repo = repo;
+      }
+
+      return normalizedRange;
+    })
+    .filter((range): range is VulnerabilityRange => range !== null);
+
+const extractKnownPatches = (affected: OsvAffectedPayload): KnownPatch[] =>
+  uniqueNonEmpty((affected.ranges ?? [])
+    .flatMap((range) => range.events.map((event) => sanitizeText(event.fixed ?? ''))))
+    .map((version) => ({
+      source: 'OSV' as const,
+      version
+    }));
+
 const toAffectedPackage = (affected: OsvAffectedPayload): VulnerabilityAffectedPackage | null => {
   const normalizedPurl = PurlNormalizer.normalize(affected.package?.purl);
   const parsedPurl = normalizedPurl ? parseNormalizedPurl(normalizedPurl) : null;
@@ -195,12 +261,24 @@ const toAffectedPackage = (affected: OsvAffectedPayload): VulnerabilityAffectedP
   const version = parsedPurl?.version ?? (normalizedPurl ? extractPurlVersion(normalizedPurl) : undefined);
   const vulnerableVersionRange = buildVersionRange(affected);
   const severity = cloneSeverityPayloads(affected.severity);
+  const packageIdentity = buildPackageIdentity({
+    ecosystem,
+    name: packageName,
+    ...(normalizedPurl ? { purl: normalizedPurl } : {})
+  });
+  const ranges = buildRangeEvents(affected);
+  const knownPatches = extractKnownPatches(affected);
+  const firstPatchedVersion = knownPatches[0]?.version;
 
   return {
     name: packageName,
     ...(ecosystem ? { ecosystem } : {}),
     ...(normalizedPurl ? { evidence: 'payload-purl' as const } : {}),
+    ...(firstPatchedVersion ? { firstPatchedVersion } : {}),
+    ...(knownPatches.length > 0 ? { knownPatches } : {}),
+    ...(packageIdentity ? { packageIdentity } : {}),
     ...(normalizedPurl ? { purl: normalizedPurl } : {}),
+    ...(ranges.length > 0 ? { ranges } : {}),
     ...(severity ? { severity } : {}),
     ...(version ? { version } : {}),
     ...(vulnerableVersionRange ? { vulnerableVersionRange } : {})
@@ -210,6 +288,7 @@ const toAffectedPackage = (affected: OsvAffectedPayload): VulnerabilityAffectedP
 const buildQueriedPurlFallbackPackage = (queriedPurl: string): (VulnerabilityAffectedPackage & {
   evidence: 'osv-query-purl';
   ecosystem: string;
+  packageIdentity: string;
   purl: string;
 }) | null => {
   const parsed = parseNormalizedPurl(queriedPurl);
@@ -221,6 +300,11 @@ const buildQueriedPurlFallbackPackage = (queriedPurl: string): (VulnerabilityAff
     evidence: 'osv-query-purl',
     ecosystem: parsed.ecosystem,
     name: parsed.name,
+    packageIdentity: buildPackageIdentity({
+      ecosystem: parsed.ecosystem,
+      name: parsed.name,
+      purl: parsed.purl
+    })!,
     purl: parsed.purl,
     ...(parsed.version ? { version: parsed.version } : {})
   };
@@ -282,6 +366,7 @@ export class OsvMapper {
             ...target,
             ...(target.ecosystem ? {} : { ecosystem: inferredPackage.ecosystem }),
             evidence: inferredPackage.evidence,
+            ...(target.packageIdentity ? {} : { packageIdentity: inferredPackage.packageIdentity }),
             purl: inferredPackage.purl,
             ...(target.version ? {} : inferredPackage.version ? { version: inferredPackage.version } : {})
           };
