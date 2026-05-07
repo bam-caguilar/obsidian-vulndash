@@ -247,6 +247,16 @@ export class DefaultUpgradePathResolver implements UpgradePathResolver {
     }
 
     if (sawUnsupported) {
+      if (sawNotAffected || sawInsufficient) {
+        return {
+          status: 'insufficient-data',
+          reason:
+            insufficientReason ??
+            unsupportedReason ??
+            `${vulnerability.id} could not be evaluated safely across all ranges.`
+        };
+      }
+
       return {
         status: 'unsupported-version-scheme',
         reason: unsupportedReason ?? `${vulnerability.id} uses an unsupported version scheme.`

@@ -1,6 +1,5 @@
 import type { IHttpClient } from '../../../application/ports/HttpClient';
 import type { FetchVulnerabilityOptions, FetchVulnerabilityResult, VulnerabilityFeed } from '../../../application/ports/VulnerabilityFeed';
-import type { KnownPatch } from '../../../domain/vulnerabilities/remediation';
 import type { Vulnerability, VulnerabilityAffectedPackage, VulnerabilityMetadata } from '../../../domain/entities/Vulnerability';
 import { buildPackageIdentity } from '../../../domain/services/PackageIdentity';
 import { filterVulnerabilitiesByDateWindow } from '../../../application/dashboard/PublishedDateWindow';
@@ -12,6 +11,7 @@ import {
 import { sanitizeMarkdown, sanitizeText, sanitizeUrl } from '../../security/sanitize';
 import { ClientBase, type FeedSyncControls } from '../common/ClientBase';
 import { extractNextLink } from './GitHubAdvisoryClient';
+import { parseKnownPatches } from './parseKnownPatches';
 
 type GitHubRepoAdvisoryItem = {
   ghsa_id?: string;
@@ -50,30 +50,6 @@ const uniqueNonEmpty = (values: string[]): string[] => {
   }
 
   return result;
-};
-
-const SAFE_PATCH_VERSION_PATTERN = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
-
-const parseKnownPatches = (patchedVersions: string | null | undefined): KnownPatch[] => {
-  const normalized = sanitizeText(patchedVersions ?? '');
-  if (!normalized) {
-    return [];
-  }
-
-  const versions = normalized
-    .split(',')
-    .map((value) => sanitizeText(value))
-    .filter((value) => value.length > 0);
-
-  if (versions.length === 0 || versions.some((value) => !SAFE_PATCH_VERSION_PATTERN.test(value))) {
-    return [];
-  }
-
-  return uniqueNonEmpty(versions).map((version) => ({
-    source: 'GHSA' as const,
-    sourceText: normalized,
-    version
-  }));
 };
 
 export class GitHubRepoClient extends ClientBase implements VulnerabilityFeed {
@@ -204,7 +180,7 @@ export class GitHubRepoClient extends ClientBase implements VulnerabilityFeed {
         return {
           name: packageName,
           ...(ecosystem ? { ecosystem } : {}),
-          ...(firstPatchedVersion ? { firstPatchedVersion } : knownPatches[0]?.version ? { firstPatchedVersion: knownPatches[0].version } : {}),
+          ...(firstPatchedVersion ? { firstPatchedVersion } : {}),
           ...(knownPatches.length > 0 ? { knownPatches } : {}),
           ...(packageIdentity ? { packageIdentity } : {}),
           ...(purl ? { purl } : {}),
