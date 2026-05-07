@@ -280,7 +280,7 @@ export class GitHubAdvisoryClient extends ClientBase implements VulnerabilityFee
         return {
           name: packageName,
           ...(ecosystem ? { ecosystem } : {}),
-          ...(firstPatchedVersion ? { firstPatchedVersion } : knownPatches[0]?.version ? { firstPatchedVersion: knownPatches[0].version } : {}),
+          ...(firstPatchedVersion ? { firstPatchedVersion } : {}),
           ...(knownPatches.length > 0 ? { knownPatches } : {}),
           ...(packageIdentity ? { packageIdentity } : {}),
           ...(purl ? { purl } : {}),

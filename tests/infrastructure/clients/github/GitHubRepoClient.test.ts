@@ -87,6 +87,113 @@ test('normalizes repo advisories and deduplicates affected products', async () =
   assert.deepEqual(vulnerability?.affectedProducts, ['widget', 'widget-api']);
 });
 
+test('uses first_patched_version as the authoritative repo patched version', async () => {
+  const httpClient: IHttpClient = {
+    async getJson() {
+      return {
+        status: 200,
+        headers: {},
+        data: [{
+          ghsa_id: 'GHSA-repo-patch',
+          summary: 'Repo advisory',
+          vulnerabilities: [{
+            package: { ecosystem: 'npm', name: 'widget' },
+            patched_versions: '2.0.0, 1.5.0',
+            first_patched_version: { identifier: '1.5.0' }
+          }]
+        }]
+      } as HttpResponse<never>;
+    }
+  };
+
+  const client = new GitHubRepoClient(
+    httpClient,
+    'github-repo-default',
+    'GitHub Repo',
+    '',
+    'openai/chatgpt',
+    controls
+  );
+
+  const result = await client.fetchVulnerabilities({ signal: new AbortController().signal });
+  const affectedPackage = result.vulnerabilities[0]?.metadata?.affectedPackages?.[0];
+
+  assert.equal(affectedPackage?.firstPatchedVersion, '1.5.0');
+  assert.deepEqual(result.vulnerabilities[0]?.metadata?.firstPatchedVersions, ['widget: 1.5.0']);
+});
+
+test('does not infer repo first patched version from out-of-order patched_versions', async () => {
+  const httpClient: IHttpClient = {
+    async getJson() {
+      return {
+        status: 200,
+        headers: {},
+        data: [{
+          ghsa_id: 'GHSA-repo-missing-first-patch',
+          summary: 'Repo advisory',
+          vulnerabilities: [{
+            package: { ecosystem: 'npm', name: 'widget' },
+            patched_versions: '2.0.0, 1.5.0'
+          }]
+        }]
+      } as HttpResponse<never>;
+    }
+  };
+
+  const client = new GitHubRepoClient(
+    httpClient,
+    'github-repo-default',
+    'GitHub Repo',
+    '',
+    'openai/chatgpt',
+    controls
+  );
+
+  const result = await client.fetchVulnerabilities({ signal: new AbortController().signal });
+  const affectedPackage = result.vulnerabilities[0]?.metadata?.affectedPackages?.[0];
+
+  assert.equal(affectedPackage?.firstPatchedVersion, undefined);
+  assert.equal(result.vulnerabilities[0]?.metadata?.firstPatchedVersions, undefined);
+  assert.deepEqual(affectedPackage?.knownPatches, [
+    { source: 'GHSA', sourceText: '2.0.0, 1.5.0', version: '2.0.0' },
+    { source: 'GHSA', sourceText: '2.0.0, 1.5.0', version: '1.5.0' }
+  ]);
+});
+
+test('drops invalid repo patched_versions while leaving first patched version unset', async () => {
+  const httpClient: IHttpClient = {
+    async getJson() {
+      return {
+        status: 200,
+        headers: {},
+        data: [{
+          ghsa_id: 'GHSA-repo-invalid-patches',
+          summary: 'Repo advisory',
+          vulnerabilities: [{
+            package: { ecosystem: 'npm', name: 'widget' },
+            patched_versions: '1.2.3, bad-version'
+          }]
+        }]
+      } as HttpResponse<never>;
+    }
+  };
+
+  const client = new GitHubRepoClient(
+    httpClient,
+    'github-repo-default',
+    'GitHub Repo',
+    '',
+    'openai/chatgpt',
+    controls
+  );
+
+  const result = await client.fetchVulnerabilities({ signal: new AbortController().signal });
+  const affectedPackage = result.vulnerabilities[0]?.metadata?.affectedPackages?.[0];
+
+  assert.equal(affectedPackage?.firstPatchedVersion, undefined);
+  assert.equal(affectedPackage?.knownPatches, undefined);
+});
+
 test('filters repo advisories by explicit published window after fetch', async () => {
   const httpClient: IHttpClient = {
     async getJson() {

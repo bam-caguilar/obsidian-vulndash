@@ -145,6 +145,98 @@ test('preserves GitHub advisory source range text when patched_versions is null'
   assert.equal(affectedPackage?.knownPatches, undefined);
 });
 
+test('uses first_patched_version as the authoritative first patched version', async () => {
+  const httpClient: IHttpClient = {
+    async getJson() {
+      return {
+        status: 200,
+        headers: {},
+        data: [{
+          ghsa_id: 'GHSA-authoritative-patch',
+          summary: 'Sample',
+          description: 'desc',
+          published_at: '2026-01-01T00:00:00.000Z',
+          updated_at: '2026-01-02T00:00:00.000Z',
+          vulnerabilities: [{
+            package: { ecosystem: 'npm', name: '@acme/widget' },
+            patched_versions: '2.0.0, 1.5.0',
+            first_patched_version: { identifier: '1.5.0' }
+          }]
+        }]
+      } as HttpResponse<never>;
+    }
+  };
+
+  const client = new GitHubAdvisoryClient(httpClient, 'github-advisories-default', 'GitHub', '', controls);
+  const result = await client.fetchVulnerabilities({ signal: new AbortController().signal });
+  const affectedPackage = result.vulnerabilities[0]?.metadata?.affectedPackages?.[0];
+
+  assert.equal(affectedPackage?.firstPatchedVersion, '1.5.0');
+  assert.deepEqual(result.vulnerabilities[0]?.metadata?.firstPatchedVersions, ['@acme/widget: 1.5.0']);
+});
+
+test('does not infer first patched version from out-of-order patched_versions', async () => {
+  const httpClient: IHttpClient = {
+    async getJson() {
+      return {
+        status: 200,
+        headers: {},
+        data: [{
+          ghsa_id: 'GHSA-missing-first-patch',
+          summary: 'Sample',
+          description: 'desc',
+          published_at: '2026-01-01T00:00:00.000Z',
+          updated_at: '2026-01-02T00:00:00.000Z',
+          vulnerabilities: [{
+            package: { ecosystem: 'npm', name: '@acme/widget' },
+            patched_versions: '2.0.0, 1.5.0'
+          }]
+        }]
+      } as HttpResponse<never>;
+    }
+  };
+
+  const client = new GitHubAdvisoryClient(httpClient, 'github-advisories-default', 'GitHub', '', controls);
+  const result = await client.fetchVulnerabilities({ signal: new AbortController().signal });
+  const affectedPackage = result.vulnerabilities[0]?.metadata?.affectedPackages?.[0];
+
+  assert.equal(affectedPackage?.firstPatchedVersion, undefined);
+  assert.equal(result.vulnerabilities[0]?.metadata?.firstPatchedVersions, undefined);
+  assert.deepEqual(affectedPackage?.knownPatches, [
+    { source: 'GHSA', sourceText: '2.0.0, 1.5.0', version: '2.0.0' },
+    { source: 'GHSA', sourceText: '2.0.0, 1.5.0', version: '1.5.0' }
+  ]);
+});
+
+test('drops invalid patched_versions while leaving first patched version unset', async () => {
+  const httpClient: IHttpClient = {
+    async getJson() {
+      return {
+        status: 200,
+        headers: {},
+        data: [{
+          ghsa_id: 'GHSA-invalid-patch-list',
+          summary: 'Sample',
+          description: 'desc',
+          published_at: '2026-01-01T00:00:00.000Z',
+          updated_at: '2026-01-02T00:00:00.000Z',
+          vulnerabilities: [{
+            package: { ecosystem: 'npm', name: '@acme/widget' },
+            patched_versions: '1.2.3, bad-version'
+          }]
+        }]
+      } as HttpResponse<never>;
+    }
+  };
+
+  const client = new GitHubAdvisoryClient(httpClient, 'github-advisories-default', 'GitHub', '', controls);
+  const result = await client.fetchVulnerabilities({ signal: new AbortController().signal });
+  const affectedPackage = result.vulnerabilities[0]?.metadata?.affectedPackages?.[0];
+
+  assert.equal(affectedPackage?.firstPatchedVersion, undefined);
+  assert.equal(affectedPackage?.knownPatches, undefined);
+});
+
 test('maps incremental cursor to GitHub updated filter', async () => {
   let seenUrl = '';
   const httpClient: IHttpClient = {
