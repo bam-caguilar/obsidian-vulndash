@@ -9,6 +9,7 @@ import {
   type ComponentTableRowModel,
   ComponentTableRenderer
 } from '../../../src/presentation/components/sbom/ComponentTableRenderer';
+import { serializeUpgradePathResolution } from '../../../src/presentation/components/sbom/componentRemediation';
 import { installFakeDom, createRoot, type FakeTableRowElement } from '../../support/fakeDom';
 
 installFakeDom();
@@ -98,7 +99,12 @@ const createRowModel = (
       overrides.hydrationState ?? 'notApplicable',
       isExpanded ? 'expanded' : 'collapsed',
       isSelected ? 'selected' : 'unselected',
-      relatedVulnerabilities.map((vulnerability) => vulnerability.id).join('|')
+      relatedVulnerabilities
+        .map((vulnerability) => [
+          vulnerability.id,
+          serializeUpgradePathResolution(vulnerability.upgradePathResolution)
+        ].join('='))
+        .join('|')
     ].join('::'),
     sbomLabel: 'portal-web.cdx.json',
     supplierLabel: component.supplier ?? 'Unknown supplier',
@@ -270,6 +276,31 @@ test('ComponentTableRenderer renders unknown severity distinctly instead of leav
   const pill = severityCell.querySelector('.vulndash-severity-pill');
   assert.ok(pill);
   assert.equal(pill.classList.contains('is-unknown'), true);
+});
+
+test('ComponentTableRenderer renders remediation status chips for non-resolved outcomes', () => {
+  const host = createRoot() as unknown as HTMLElement;
+  const renderer = createRenderer();
+  const row = createRowModel('purl:pkg:npm/widget@1.0.0', {
+    relatedVulnerabilities: [createRelatedVulnerability({
+      upgradePathResolution: {
+        diagnostics: ['No structured ranges available.'],
+        rejectedCandidates: [],
+        status: 'insufficient-data'
+      }
+    })],
+    vulnerabilityCount: 1
+  });
+
+  renderer.mount(host);
+  renderer.render([row]);
+
+  const remediationCell = getRowByKey(host, row.key).cells.item(6);
+  assert.ok(remediationCell);
+  assert.equal(remediationCell.textContent?.includes('No data'), true);
+  const chip = remediationCell.querySelector('.vulndash-component-remediation-chip');
+  assert.ok(chip);
+  assert.equal(chip.classList.contains('is-insufficient-data'), true);
 });
 
 test('ComponentTableRenderer sorting reorders existing row nodes', () => {

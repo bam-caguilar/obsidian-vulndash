@@ -11,10 +11,7 @@ import {
   deriveComponentInventoryState
 } from './ComponentInventoryStore';
 import type { ComponentDetailsRenderer } from './ComponentDetailPanel';
-import {
-  ComponentTableRenderer,
-  type ComponentTableRowModel
-} from './ComponentTableRenderer';
+import { VirtualizedComponentTable } from './VirtualizedComponentTable';
 
 export interface ComponentInventoryViewCallbacks {
   detailsRenderer: ComponentDetailsRenderer;
@@ -59,17 +56,19 @@ export class ComponentInventoryView {
   private stateHostEl: HTMLDivElement | null = null;
   private summaryHostEl: HTMLDivElement | null = null;
   private tableHostEl: HTMLDivElement | null = null;
-  private readonly tableRenderer: ComponentTableRenderer;
+  private readonly tableRenderer: VirtualizedComponentTable;
   private visibleRowKeys: string[] = [];
 
   public constructor(
     private readonly callbacks: ComponentInventoryViewCallbacks
   ) {
-    this.tableRenderer = new ComponentTableRenderer({
+    this.tableRenderer = new VirtualizedComponentTable({
       detailsRenderer: this.callbacks.detailsRenderer,
-      onDisableComponent: (componentKey) => this.handlePreferenceAction(componentKey, 'disable'),
-      onEnableComponent: (componentKey) => this.handlePreferenceAction(componentKey, 'enable'),
-      onFollowComponent: (componentKey) => this.handlePreferenceAction(componentKey, 'follow'),
+      isExpanded: (componentKey) => this.expandedKeys.has(componentKey),
+      isSelected: (componentKey) => this.selectedComponentKey === componentKey,
+      onDisable: (component) => void this.handlePreferenceAction(component.key, 'disable'),
+      onEnable: (component) => void this.handlePreferenceAction(component.key, 'enable'),
+      onFollow: (component) => void this.handlePreferenceAction(component.key, 'follow'),
       onSelectComponent: (componentKey) => {
         if (this.selectedComponentKey === componentKey) {
           return;
@@ -87,7 +86,7 @@ export class ComponentInventoryView {
         }
         this.renderResults();
       },
-      onUnfollowComponent: (componentKey) => this.handlePreferenceAction(componentKey, 'unfollow'),
+      onUnfollow: (component) => void this.handlePreferenceAction(component.key, 'unfollow'),
       ...(this.callbacks.onOpenNote !== undefined
         ? { onOpenNote: this.callbacks.onOpenNote }
         : {})
@@ -107,7 +106,7 @@ export class ComponentInventoryView {
     this.issuesHostEl = this.resultsHostEl.createDiv({ cls: 'vulndash-component-issues-region' });
     this.tableHostEl = this.resultsHostEl.createDiv({ cls: 'vulndash-component-table-region' });
     this.diagnosticsHostEl = this.resultsHostEl.createDiv({ cls: 'vulndash-component-diagnostics-region' });
-    this.tableRenderer.mount(this.tableHostEl);
+    this.tableHostEl.appendChild(this.tableRenderer.container);
 
     this.setRegionVisible(this.stateHostEl, false);
     this.setRegionVisible(this.issuesHostEl, false);
@@ -329,7 +328,7 @@ export class ComponentInventoryView {
     const transientState = this.getTransientStateCard();
     this.renderStateCard(transientState);
     this.renderIssues(inventory.issues.length > 0 ? inventory : null);
-    this.renderTable(this.buildTableRowModels(derivedState.components));
+    this.renderTable(derivedState.components);
     this.renderPurlDiagnostics(derivedState.purlMatches);
   }
 
@@ -447,12 +446,12 @@ export class ComponentInventoryView {
     }
   }
 
-  private renderTable(rows: readonly ComponentTableRowModel[]): void {
+  private renderTable(rows: readonly ComponentInventoryDisplayEntry[]): void {
     this.renderTableWithOptions(rows, {});
   }
 
   private renderTableWithOptions(
-    rows: readonly ComponentTableRowModel[],
+    rows: readonly ComponentInventoryDisplayEntry[],
     options: {
       preserveSelection?: boolean;
       retainShellWhenEmpty?: boolean;
@@ -470,7 +469,7 @@ export class ComponentInventoryView {
 
       if (options.retainShellWhenEmpty) {
         this.setRegionVisible(this.tableHostEl, true);
-        this.tableRenderer.render([]);
+        this.tableRenderer.updateData([]);
         return;
       }
 
@@ -478,18 +477,11 @@ export class ComponentInventoryView {
       return;
     }
 
-    const nextVisibleKeys = rows.map((row) => row.key);
+    const nextVisibleKeys = rows.map((row) => row.component.key);
     this.selectedComponentKey = this.reconcileSelectedComponentKey(nextVisibleKeys);
     this.visibleRowKeys = [...nextVisibleKeys];
     this.setRegionVisible(this.tableHostEl, true);
-    this.tableRenderer.render(rows.map((row) =>
-      row.key === this.selectedComponentKey || (!this.selectedComponentKey && row.isExpanded)
-        ? {
-            ...row,
-            isSelected: true
-          }
-        : row
-    ));
+    this.tableRenderer.updateData([...rows]);
   }
 
   private renderPurlDiagnostics(
@@ -747,86 +739,6 @@ export class ComponentInventoryView {
     element.style.display = visible ? '' : 'none';
   }
 
-  private buildTableRowModels(
-    components: readonly ComponentInventoryDisplayEntry[]
-  ): readonly ComponentTableRowModel[] {
-    return components.map((entry) => this.toTableRowModel(entry));
-  }
-
-  private toTableRowModel(
-    entry: ComponentInventoryDisplayEntry
-  ): ComponentTableRowModel {
-    const projectNames = uniqueNonEmptyValues(entry.visibleSources.map((source) => source.projectName));
-    const sbomNames = uniqueNonEmptyValues(entry.visibleSources.map((source) => source.sbomFileName));
-    const projectLabel = projectNames[0] ?? 'Unassigned Project';
-    const sbomLabel = sbomNames[0] ?? 'Unknown SBOM';
-    const projectCaption = projectNames.length > 1
-      ? `${projectNames.length} projects in scope`
-      : undefined;
-    const sbomCaption = sbomNames.length > 1
-      ? `${sbomNames.length} SBOM files in scope`
-      : undefined;
-    const supplierLabel = entry.component.supplier?.trim() || 'Unknown supplier';
-    const versionLabel = entry.component.version?.trim() || 'No version';
-    const identifierLabel = entry.component.purl?.trim()
-      || entry.component.cpe?.trim()
-      || 'None';
-
-    return {
-      component: entry.component,
-      componentName: entry.component.name,
-      highestSeverity: entry.highestSeverity,
-      hydrationState: entry.hydrationState,
-      identifierLabel,
-      isExpanded: this.expandedKeys.has(entry.component.key),
-      isSelected: this.selectedComponentKey === entry.component.key,
-      key: entry.component.key,
-      ...(projectCaption ? { projectCaption } : {}),
-      projectLabel,
-      relatedVulnerabilities: entry.relatedVulnerabilities,
-      rowStateHash: [
-        entry.component.key,
-        projectLabel,
-        projectCaption ?? '',
-        sbomLabel,
-        sbomCaption ?? '',
-        entry.component.name,
-        supplierLabel,
-        versionLabel,
-        identifierLabel,
-        String(entry.vulnerabilityCount),
-        entry.highestSeverity ?? '',
-        entry.hydrationState,
-        entry.component.isEnabled ? 'enabled' : 'disabled',
-        entry.component.isFollowed ? 'followed' : 'unfollowed',
-        this.selectedComponentKey === entry.component.key ? 'selected' : 'unselected',
-        this.expandedKeys.has(entry.component.key) ? 'expanded' : 'collapsed',
-        entry.component.formats.join(','),
-        entry.relatedVulnerabilities
-          .map((vulnerability) => [
-            vulnerability.source,
-            vulnerability.id,
-            vulnerability.hydrationState,
-            vulnerability.severity,
-            String(vulnerability.cvssScore),
-            vulnerability.normalizedSeverity?.rating ?? '',
-            String(vulnerability.normalizedSeverity?.score ?? ''),
-            vulnerability.normalizedSeverity?.source ?? '',
-            vulnerability.normalizedSeverity?.method ?? '',
-            vulnerability.normalizedSeverity?.vector ?? '',
-            vulnerability.title
-          ].join(':'))
-          .sort((left, right) => left.localeCompare(right))
-          .join('|')
-      ].join('::'),
-      ...(sbomCaption ? { sbomCaption } : {}),
-      sbomLabel,
-      supplierLabel,
-      versionLabel,
-      vulnerabilityCount: entry.vulnerabilityCount
-    };
-  }
-
   private reconcileSelectedComponentKey(
     nextVisibleKeys: readonly string[]
   ): string | null {
@@ -853,10 +765,3 @@ export class ComponentInventoryView {
     return nextVisibleKeys.find((key) => this.expandedKeys.has(key)) ?? nextVisibleKeys[0] ?? null;
   }
 }
-
-const uniqueNonEmptyValues = (
-  values: ReadonlyArray<string | undefined>
-): string[] =>
-  Array.from(new Set(values
-    .map((value) => value?.trim())
-    .filter((value): value is string => Boolean(value))));

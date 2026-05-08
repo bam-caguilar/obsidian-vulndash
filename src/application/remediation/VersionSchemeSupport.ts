@@ -5,9 +5,10 @@ export interface ParsedSemverVersion {
   prerelease: Array<number | string>;
 }
 
-// Only npm is supported today because other ecosystems do not share identical version semantics.
-// Any future ecosystem must ship with a dedicated evaluator and regression tests before being added here.
-const SUPPORTED_SEMVER_ECOSYSTEMS = new Set(['npm']);
+// Only npm-compatible semver ecosystems are supported here.
+// `yarn` shares npm's semver behavior, but other ecosystems require dedicated evaluators
+// plus regression tests before being added to this allowlist.
+const SUPPORTED_SEMVER_ECOSYSTEMS = new Set(['npm', 'yarn']);
 
 const SEMVER_PATTERN =
   /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;

@@ -6,13 +6,16 @@ import {
 import type { ComponentInventoryDisplayEntry } from './ComponentInventoryStore';
 import type { ComponentDetailPanelCallbacks, ComponentDetailsRenderer } from './ComponentDetailPanel';
 import { RowRenderer } from '../virtualization/RowRenderer';
+import { getComponentRemediationDisplay } from './componentRemediation';
 
 export interface ComponentRowRendererCallbacks extends ComponentDetailPanelCallbacks {
   detailsRenderer: ComponentDetailsRenderer;
   isExpanded: (componentKey: string) => boolean;
+  isSelected: (componentKey: string) => boolean;
   onDisable: (component: TrackedComponent) => void;
   onEnable: (component: TrackedComponent) => void;
   onFollow: (component: TrackedComponent) => void;
+  onSelectComponent: (componentKey: string) => void;
   onUnfollow: (component: TrackedComponent) => void;
   onToggleExpanded: (componentKey: string, expanded: boolean) => void;
 }
@@ -27,6 +30,7 @@ export class ComponentRowRenderer implements RowRenderer<ComponentInventoryDispl
   public renderRow(entry: ComponentInventoryDisplayEntry, index: number): HTMLElement {
     const component = entry.component;
     const expanded = this.callbacks.isExpanded(component.key);
+    const selected = this.callbacks.isSelected(component.key);
 
     const row = document.createElement('div');
     row.className = 'vulndash-virtual-row-container';
@@ -34,21 +38,22 @@ export class ComponentRowRenderer implements RowRenderer<ComponentInventoryDispl
 
     // The Main Visible Row
     const mainRow = document.createElement('div');
-    mainRow.className = 'vulndash-virtual-row component-row';
-    this.applyRowClasses(mainRow, component, entry.vulnerabilityCount);
+    mainRow.className = 'vulndash-virtual-row vulndash-component-row';
+    mainRow.addEventListener('click', () => this.callbacks.onSelectComponent(component.key));
+    this.applyRowClasses(mainRow, component, entry.vulnerabilityCount, selected);
 
     // Project Column
     const projectNames = uniqueValues(entry.visibleSources.map((source) => source.projectName));
-    const projectCol = mainRow.createDiv({ cls: 'vulndash-component-col-project' });
+    const projectCol = mainRow.createDiv({ cls: 'vulndash-col vulndash-component-col-project' });
     this.renderValueStack(projectCol, projectNames[0] ?? 'Unassigned Project', projectNames.length > 1 ? `${projectNames.length} projects in scope` : undefined);
 
     // SBOM Column
     const sbomNames = uniqueValues(entry.visibleSources.map((source) => source.sbomFileName));
-    const sbomCol = mainRow.createDiv({ cls: 'vulndash-component-col-sbom' });
+    const sbomCol = mainRow.createDiv({ cls: 'vulndash-col vulndash-component-col-sbom' });
     this.renderValueStack(sbomCol, sbomNames[0] ?? 'Unknown SBOM', sbomNames.length > 1 ? `${sbomNames.length} SBOM files in scope` : undefined);
 
     // Name Column
-    const nameCol = mainRow.createDiv({ cls: 'vulndash-component-col-name' });
+    const nameCol = mainRow.createDiv({ cls: 'vulndash-col vulndash-component-col-name' });
     const nameStack = nameCol.createDiv({ cls: 'vulndash-component-name-stack' });
     nameStack.createEl('strong', { text: component.name });
     nameStack.createDiv({ cls: 'vulndash-muted-copy', text: component.supplier ?? 'Unknown supplier' });
@@ -56,11 +61,11 @@ export class ComponentRowRenderer implements RowRenderer<ComponentInventoryDispl
     this.renderBadges(stateBadges, component);
 
     // Version & Identifier
-    mainRow.createDiv({ cls: 'vulndash-component-col-version', text: component.version ?? 'No version' });
-    mainRow.createDiv({ cls: 'vulndash-component-col-identifier vulndash-component-table-mono', text: component.purl ?? component.cpe ?? 'None' });
+    mainRow.createDiv({ cls: 'vulndash-col vulndash-component-col-version', text: component.version ?? 'No version' });
+    mainRow.createDiv({ cls: 'vulndash-col vulndash-component-col-identifier vulndash-component-table-mono', text: component.purl ?? component.cpe ?? 'None' });
 
     // Vulnerability Column
-    const vulnCol = mainRow.createDiv({ cls: 'vulndash-component-col-vulnerabilities' });
+    const vulnCol = mainRow.createDiv({ cls: 'vulndash-col vulndash-component-col-vulnerabilities' });
     const vulnStack = vulnCol.createDiv({ cls: 'vulndash-component-vuln-stack' });
     vulnStack.createSpan({ text: String(entry.vulnerabilityCount) });
     vulnStack.createSpan({
@@ -68,8 +73,11 @@ export class ComponentRowRenderer implements RowRenderer<ComponentInventoryDispl
       text: formatDisplaySeverity(entry.highestSeverity, 'None')
     });
 
+    const remCol = mainRow.createDiv({ cls: 'vulndash-col vulndash-component-col-remediation' });
+    this.renderRemediationCell(remCol, entry);
+
     // Actions Column
-    const actionsCol = mainRow.createDiv({ cls: 'vulndash-component-col-actions' });
+    const actionsCol = mainRow.createDiv({ cls: 'vulndash-col vulndash-component-col-actions' });
     this.renderActions(actionsCol, component, expanded);
 
     row.appendChild(mainRow);
@@ -102,59 +110,17 @@ export class ComponentRowRenderer implements RowRenderer<ComponentInventoryDispl
   }
 
   public updateRow(element: HTMLElement, entry: ComponentInventoryDisplayEntry, index: number): void {
+    const replacement = this.renderRow(entry, index);
     element.dataset.index = index.toString();
-    const mainRow = element.firstElementChild as HTMLElement;
-    if (!mainRow) return;
-
-    this.applyRowClasses(mainRow, entry.component, entry.vulnerabilityCount);
-    const cols = Array.from(mainRow.children) as HTMLElement[];
-    if (cols.length < 7) return;
-
-    const [projectCol, sbomCol, nameCol, versionCol, purlCol, vulnCol, actionsCol] = cols as [
-      HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement
-    ];
-
-    projectCol.empty();
-    const projectNames = uniqueValues(entry.visibleSources.map((source) => source.projectName));
-    this.renderValueStack(projectCol, projectNames[0] ?? 'Unassigned Project', projectNames.length > 1 ? `${projectNames.length} projects in scope` : undefined);
-
-    sbomCol.empty();
-    const sbomNames = uniqueValues(entry.visibleSources.map((source) => source.sbomFileName));
-    this.renderValueStack(sbomCol, sbomNames[0] ?? 'Unknown SBOM', sbomNames.length > 1 ? `${sbomNames.length} SBOM files in scope` : undefined);
-
-    const nameStack = nameCol.querySelector('.vulndash-component-name-stack') as HTMLElement | null;
-    if (nameStack) {
-      const strong = nameStack.querySelector('strong') as HTMLElement | null;
-      if (strong) strong.textContent = entry.component.name;
-      const badges = nameStack.querySelector('.vulndash-component-chip-list') as HTMLElement | null;
-      if (badges) {
-        badges.empty();
-        this.renderBadges(badges as HTMLElement, entry.component);
-      }
-    }
-
-    versionCol.textContent = entry.component.version ?? 'No version';
-    purlCol.textContent = entry.component.purl ?? entry.component.cpe ?? 'None';
-
-    const vulnStack = vulnCol.querySelector('.vulndash-component-vuln-stack') as HTMLElement | null;
-    if (vulnStack) {
-      vulnStack.empty();
-      vulnStack.createSpan({ text: String(entry.vulnerabilityCount) });
-      vulnStack.createSpan({
-        cls: getSeverityBadgeClassName(entry.highestSeverity, entry.hydrationState),
-        text: formatDisplaySeverity(entry.highestSeverity, 'None')
-      });
-    }
-
-    actionsCol.empty();
-    this.renderActions(actionsCol, entry.component, this.callbacks.isExpanded(entry.component.key));
+    element.replaceChildren(...Array.from(replacement.children));
   }
 
-  private applyRowClasses(row: HTMLElement, component: TrackedComponent, vulnCount: number): void {
-    row.className = 'vulndash-virtual-row component-row';
+  private applyRowClasses(row: HTMLElement, component: TrackedComponent, vulnCount: number, selected: boolean): void {
+    row.className = 'vulndash-virtual-row vulndash-component-row';
     if (!component.isEnabled) row.classList.add('is-disabled');
     if (component.isFollowed) row.classList.add('is-followed');
     if (vulnCount > 0) row.classList.add('is-vulnerable');
+    if (selected) row.classList.add('is-selected');
   }
 
   private renderValueStack(container: HTMLElement, primary: string, secondary?: string): void {
@@ -178,11 +144,21 @@ export class ComponentRowRenderer implements RowRenderer<ComponentInventoryDispl
     }
   }
 
+  private renderRemediationCell(container: HTMLElement, entry: ComponentInventoryDisplayEntry): void {
+    const remediation = getComponentRemediationDisplay(entry.relatedVulnerabilities);
+    container.empty();
+    container.title = remediation.title;
+    container.createSpan({
+      cls: remediation.className,
+      text: remediation.label
+    });
+  }
+
   private renderActions(container: HTMLElement, component: TrackedComponent, expanded: boolean): void {
     const actions = container.createDiv({ cls: 'vulndash-component-row-actions' });
 
     const followBtn = actions.createEl('button', { text: component.isFollowed ? 'Unfollow' : 'Follow' });
-    followBtn.addClass(component.isFollowed ? 'mod-muted' : 'mod-cta');
+    followBtn.addClass(component.isFollowed ? 'mod-muted' : 'mod-cta', 'vulndash-action-button');
     followBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       if (component.isFollowed) {
@@ -193,7 +169,7 @@ export class ComponentRowRenderer implements RowRenderer<ComponentInventoryDispl
     });
 
     const enableBtn = actions.createEl('button', { text: component.isEnabled ? 'Disable' : 'Enable' });
-    enableBtn.addClass(!component.isEnabled ? 'mod-cta' : 'mod-muted');
+    enableBtn.addClass(!component.isEnabled ? 'mod-cta' : 'mod-muted', 'vulndash-action-button');
     enableBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       if (component.isEnabled) {
@@ -204,6 +180,7 @@ export class ComponentRowRenderer implements RowRenderer<ComponentInventoryDispl
     });
 
     const detailBtn = actions.createEl('button', { text: expanded ? 'Hide Details' : 'View Details' });
+    detailBtn.addClass('vulndash-action-button');
     detailBtn.onclick = (e) => {
       e.stopPropagation();
       this.callbacks.onToggleExpanded(component.key, !expanded);

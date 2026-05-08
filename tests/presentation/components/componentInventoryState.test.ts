@@ -248,6 +248,78 @@ test('deriveComponentInventoryState counts linked vulnerabilities even when the 
   assert.deepEqual(derived.components.map((entry) => entry.component.name), ['widget']);
 });
 
+test('deriveComponentInventoryState excludes already-safe linked advisories from active vulnerability counts and vulnerable-only filtering', () => {
+  const snapshot = createSnapshot([createComponent({
+    key: 'purl:pkg:npm/safe-widget@1.2.3',
+    name: 'safe-widget',
+    purl: 'pkg:npm/safe-widget@1.2.3',
+    version: '1.2.3'
+  })], new Map([
+    ['purl:pkg:npm/safe-widget@1.2.3', [createRelatedVulnerability({
+      id: 'GHSA-safe-widget',
+      upgradePathResolution: {
+        rejectedCandidates: [],
+        status: 'already-safe'
+      }
+    })]]
+  ]));
+
+  const allDerived = deriveComponentInventoryState(snapshot, createDefaultComponentInventoryFilters());
+  assert.equal(allDerived.summary.vulnerableCount, 0);
+  assert.equal(allDerived.components[0]?.vulnerabilityCount, 0);
+  assert.equal(allDerived.components[0]?.highestSeverity, undefined);
+  assert.equal(allDerived.components[0]?.relatedVulnerabilities.length, 1);
+
+  const vulnerableOnly = deriveComponentInventoryState(snapshot, {
+    ...createDefaultComponentInventoryFilters(),
+    vulnerableOnly: true
+  });
+  assert.equal(vulnerableOnly.components.length, 0);
+});
+
+test('deriveComponentInventoryState suppresses embedded vulnerability counts when the linked advisory proves the current version is already safe', () => {
+  const source = createSource({
+    id: 'component-occurrence::sbom-a::safe-embedded-widget',
+    vulnerabilityCount: 1,
+    vulnerabilityIds: ['GHSA-safe-embedded']
+  });
+  const component = createComponent({
+    highestSeverity: 'high',
+    key: 'purl:pkg:npm/safe-embedded-widget@1.2.3',
+    name: 'safe-embedded-widget',
+    purl: 'pkg:npm/safe-embedded-widget@1.2.3',
+    sources: [source],
+    vulnerabilities: [{
+      cwes: [],
+      id: 'GHSA-safe-embedded',
+      severity: 'high'
+    }],
+    vulnerabilityCount: 1,
+    version: '1.2.3'
+  });
+  const snapshot = createSnapshot(
+    [component],
+    undefined,
+    [],
+    new Map([
+      [source.id, [createRelatedVulnerability({
+        id: 'GHSA-safe-embedded',
+        upgradePathResolution: {
+          rejectedCandidates: [],
+          status: 'already-safe'
+        }
+      })]]
+    ])
+  );
+
+  const derived = deriveComponentInventoryState(snapshot, createDefaultComponentInventoryFilters());
+
+  assert.equal(derived.summary.vulnerableCount, 0);
+  assert.equal(derived.components[0]?.vulnerabilityCount, 0);
+  assert.equal(derived.components[0]?.highestSeverity, undefined);
+  assert.equal(derived.components[0]?.relatedVulnerabilities.length, 1);
+});
+
 test('deriveComponentInventoryState filters purl diagnostics to the visible component set', () => {
   const snapshot = createSnapshot([
     createComponent({

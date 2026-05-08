@@ -157,6 +157,23 @@ test('unsupported version scheme returns unsupported-version-scheme', () => {
   assert.equal(resolution.status, 'unsupported-version-scheme');
 });
 
+test('npm-compatible yarn ecosystems resolve the closest safe patch', () => {
+  const target = createVulnerability({
+    ecosystem: 'yarn',
+    knownPatches: [{ source: 'OSV', version: '1.0.2' }],
+    ranges: [createRange([{ introduced: '0' }, { fixed: '1.0.2' }])]
+  });
+
+  const resolution = resolver.calculateSafestUpgrade({
+    allComponentVulnerabilities: [target],
+    currentVersion: '1.0.0',
+    targetVulnerability: target
+  });
+
+  assert.equal(resolution.status, 'resolved');
+  assert.equal(resolution.recommendedUpgradeVersion, '1.0.2');
+});
+
 test('semver not-affected plus git unsupported returns insufficient-data', () => {
   const evaluation = evaluateVulnerabilityVersion(createVulnerability({
     ranges: [

@@ -13,6 +13,7 @@ import type {
   ComponentDetailsRenderer
 } from './ComponentDetailPanel';
 import { buildRowPatchPlan } from './buildRowPatchPlan';
+import { getComponentRemediationDisplay } from './componentRemediation';
 
 export interface ComponentTableRowModel {
   readonly component: TrackedComponent;
@@ -62,6 +63,7 @@ const HEADER_LABELS = [
   'Version',
   'PURL',
   'Vulnerabilities',
+  'Remediation',
   'Actions'
 ] as const;
 
@@ -293,6 +295,10 @@ export class ComponentTableRenderer {
     row.appendChild(identifierCell);
 
     row.appendChild(this.createVulnerabilityCell(rowModel));
+
+    // Create and append Remediation cell
+    row.appendChild(this.createRemediationCell(rowModel));
+
     row.appendChild(this.createActionsCell(rowModel));
     return row;
   }
@@ -373,6 +379,18 @@ export class ComponentTableRenderer {
       formatDisplaySeverity(rowModel.highestSeverity, 'None')
     ));
     cell.appendChild(stack);
+    return cell;
+  }
+
+  private createRemediationCell(rowModel: ComponentTableRowModel): HTMLTableCellElement {
+    const cell = document.createElement('td');
+    cell.className = 'vulndash-component-col-remediation';
+    const remediation = getComponentRemediationDisplay(rowModel.relatedVulnerabilities);
+    cell.title = remediation.title;
+    const chip = document.createElement('span');
+    chip.className = remediation.className;
+    chip.textContent = remediation.label;
+    cell.appendChild(chip);
     return cell;
   }
 
@@ -470,7 +488,16 @@ export class ComponentTableRenderer {
     versionCell.textContent = rowModel.versionLabel;
     identifierCell.textContent = rowModel.identifierLabel;
     cells[5]?.replaceChildren(this.createVulnerabilityCell(rowModel).firstElementChild as HTMLElement);
-    cells[6]?.replaceChildren(this.createActionsCell(rowModel).firstElementChild as HTMLElement);
+    const remCell = cells[6];
+    if (!remCell) {
+      rowEl.replaceChildren(...Array.from(this.createMainRow(rowModel).children));
+      return;
+    }
+    const replacementRemediationCell = this.createRemediationCell(rowModel);
+    remCell.className = replacementRemediationCell.className;
+    remCell.title = replacementRemediationCell.title;
+    remCell.replaceChildren(...Array.from(replacementRemediationCell.childNodes));
+    cells[7]?.replaceChildren(this.createActionsCell(rowModel).firstElementChild as HTMLElement);
   }
 
   private patchDetailsRow(
@@ -558,6 +585,8 @@ export class ComponentTableRenderer {
       case 5:
         return 'vulndash-component-col-vulnerabilities';
       case 6:
+        return 'vulndash-component-col-remediation';
+      case 7:
       default:
         return 'vulndash-component-col-actions';
     }
