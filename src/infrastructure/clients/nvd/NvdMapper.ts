@@ -4,6 +4,11 @@ import type {
   VulnerabilityMetadata,
   VulnerabilitySourceUrls
 } from '../../../domain/entities/Vulnerability';
+import type {
+  KnownPatch,
+  VulnerabilityRange,
+  VulnerabilityRangeEvent
+} from '../../../domain/vulnerabilities/remediation';
 import { classifySeverity } from '../../../domain/value-objects/CvssScore';
 import { normalizeVulnerabilitySeverity } from '../../../domain/vulnerabilities/normalizeVulnerabilitySeverity';
 import { ProductNameNormalizer } from '../../../domain/services/ProductNameNormalizer';
@@ -187,10 +192,44 @@ export class NvdMapper {
 
     const vendor = this.productNameNormalizer.normalize(parsed.vendor);
     const vulnerableVersionRange = buildVersionRange(match, parsed.version);
+    const fixedVersion = cleanCpeToken(match.versionEndExcluding ?? '');
+    const lastAffected = cleanCpeToken(match.versionEndIncluding ?? '');
+    const startIncluding = cleanCpeToken(match.versionStartIncluding ?? '');
+    const startExcluding = cleanCpeToken(match.versionStartExcluding ?? '');
+    const knownPatches: KnownPatch[] = fixedVersion
+      ? [{ source: 'NVD', version: fixedVersion }]
+      : [];
+    const rangeEvents: VulnerabilityRangeEvent[] = [];
+
+    if (startIncluding) {
+      rangeEvents.push({ introduced: startIncluding });
+    } else if (startExcluding) {
+      rangeEvents.push({ introduced: startExcluding });
+    } else if (fixedVersion || lastAffected) {
+      rangeEvents.push({ introduced: '0' });
+    }
+
+    if (fixedVersion) {
+      rangeEvents.push({ fixed: fixedVersion });
+    } else if (lastAffected) {
+      rangeEvents.push({ lastAffected });
+    }
+
+    // Preserve NVD bounds as structured remediation hints even when the ecosystem is unknown.
+    // The application layer will still gate upgrade-path evaluation on supported ecosystems.
+    const ranges: VulnerabilityRange[] = rangeEvents.length > 1
+      ? [{
+        events: rangeEvents,
+        type: 'ECOSYSTEM'
+      }]
+      : [];
 
     return {
       ...(criteria ? { cpe: criteria } : {}),
+      ...(knownPatches.length > 0 ? { firstPatchedVersion: fixedVersion } : {}),
+      ...(knownPatches.length > 0 ? { knownPatches } : {}),
       name: product,
+      ...(ranges.length > 0 ? { ranges } : {}),
       ...(vendor ? { vendor } : {}),
       ...(parsed.version && parsed.version !== '*' && parsed.version !== '-' ? { version: parsed.version } : {}),
       ...(vulnerableVersionRange ? { vulnerableVersionRange } : {})

@@ -65,7 +65,13 @@ test('extracts CWE and affected package metadata from NVD records', () => {
   assert.deepEqual(vulnerability.metadata?.packages, ['Widget']);
   assert.deepEqual(vulnerability.metadata?.affectedPackages, [{
     cpe: 'cpe:2.3:a:acme:widget:2.3.4:*:*:*:*:*:*:*',
+    firstPatchedVersion: '2.4.0',
+    knownPatches: [{ source: 'NVD', version: '2.4.0' }],
     name: 'Widget',
+    ranges: [{
+      events: [{ introduced: '2.0.0' }, { fixed: '2.4.0' }],
+      type: 'ECOSYSTEM'
+    }],
     vendor: 'Acme',
     version: '2.3.4',
     vulnerableVersionRange: '2.3.4, >= 2.0.0, < 2.4.0'
@@ -73,4 +79,34 @@ test('extracts CWE and affected package metadata from NVD records', () => {
   assert.deepEqual(vulnerability.metadata?.vulnerableVersionRanges, ['Acme Widget: 2.3.4, >= 2.0.0, < 2.4.0']);
   assert.equal(vulnerability.metadata?.sourceUrls?.html, 'https://nvd.nist.gov/vuln/detail/CVE-2026-6002');
   assert.ok(vulnerability.references.includes('https://example.com/CVE-2026-6002'));
+});
+
+test('does not invent known patches when NVD only provides a last affected version', () => {
+  const mapper = new NvdMapper('NVD');
+  const vulnerability = mapper.normalize({
+    id: 'CVE-2026-6003',
+    published: '2026-04-15T00:00:00.000Z',
+    lastModified: '2026-04-15T01:00:00.000Z',
+    descriptions: [{ lang: 'en', value: 'Acme Widget is vulnerable through 2.4.0.' }],
+    configurations: [{
+      nodes: [{
+        cpeMatch: [{
+          criteria: 'cpe:2.3:a:acme:widget:*:*:*:*:*:*:*:*',
+          versionEndIncluding: '2.4.0',
+          vulnerable: true
+        }]
+      }]
+    }]
+  });
+
+  assert.deepEqual(vulnerability.metadata?.affectedPackages, [{
+    cpe: 'cpe:2.3:a:acme:widget:*:*:*:*:*:*:*:*',
+    name: 'Widget',
+    ranges: [{
+      events: [{ introduced: '0' }, { lastAffected: '2.4.0' }],
+      type: 'ECOSYSTEM'
+    }],
+    vendor: 'Acme',
+    vulnerableVersionRange: '<= 2.4.0'
+  }]);
 });
