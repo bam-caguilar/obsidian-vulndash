@@ -9,6 +9,12 @@ import type {
   TrackedComponentSource
 } from '../../../application/sbom/types';
 import {
+  buildRelatedVulnerabilityIdKey,
+  buildRelatedVulnerabilityIdentityKey,
+  collectAlreadySafeVulnerabilityIdKeys,
+  filterActiveRelatedVulnerabilities
+} from '../../../application/sbom/RelatedVulnerabilityActivity';
+import {
   getHighestDisplaySeverity,
   matchesDisplaySeverityFilter,
   resolveDisplaySeverity,
@@ -48,6 +54,7 @@ export interface ComponentInventoryDerivedState {
 
 export interface ComponentInventoryDisplayEntry {
   allSeverities: readonly SeverityRating[];
+  activeRelatedVulnerabilities: readonly RelatedVulnerabilitySummary[];
   component: TrackedComponent;
   highestSeverity: DisplaySeverity | undefined;
   hydrationState: VulnerabilityHydrationState;
@@ -161,7 +168,8 @@ const getVisibleSources = (
 
 const getScopedEmbeddedVulnerabilities = (
   component: TrackedComponent,
-  sources: readonly TrackedComponentSource[]
+  sources: readonly TrackedComponentSource[],
+  relatedVulnerabilities: readonly RelatedVulnerabilitySummary[]
 ): ReadonlyArray<TrackedComponent['vulnerabilities'][number]> => {
   const visibleVulnerabilityIds = new Set(
     sources.flatMap((source) => source.vulnerabilityIds.map((vulnerabilityId) => normalizeToken(vulnerabilityId)))
@@ -170,7 +178,12 @@ const getScopedEmbeddedVulnerabilities = (
     return [];
   }
 
-  return component.vulnerabilities.filter((vulnerability) => visibleVulnerabilityIds.has(normalizeToken(vulnerability.id)));
+  const alreadySafeIds = collectAlreadySafeVulnerabilityIdKeys(relatedVulnerabilities);
+
+  return component.vulnerabilities.filter((vulnerability) =>
+    visibleVulnerabilityIds.has(normalizeToken(vulnerability.id))
+    && !alreadySafeIds.has(buildRelatedVulnerabilityIdKey(vulnerability.id))
+  );
 };
 
 const getScopedRelatedVulnerabilities = (
@@ -187,7 +200,7 @@ const getScopedRelatedVulnerabilities = (
     }
     const related = snapshot.relationships.vulnerabilitiesByOccurrence.get(source.id) ?? [];
     for (const vulnerability of related) {
-      const key = `${normalizeToken(vulnerability.source)}::${normalizeToken(vulnerability.id)}`;
+      const key = buildRelatedVulnerabilityIdentityKey(vulnerability);
       if (!deduped.has(key)) {
         deduped.set(key, vulnerability);
       }
@@ -196,7 +209,7 @@ const getScopedRelatedVulnerabilities = (
 
   if (!hasOccurrenceMappings) {
     for (const vulnerability of snapshot.relationships.vulnerabilitiesByComponent.get(component.key) ?? []) {
-      const key = `${normalizeToken(vulnerability.source)}::${normalizeToken(vulnerability.id)}`;
+      const key = buildRelatedVulnerabilityIdentityKey(vulnerability);
       if (!deduped.has(key)) {
         deduped.set(key, vulnerability);
       }
@@ -212,10 +225,9 @@ const toDisplayEntry = (
   filters: Pick<ComponentInventoryFilters, 'projectId' | 'sbomId' | 'sourceFile' | 'sourceFormat'>
 ): ComponentInventoryDisplayEntry => {
   const visibleSources = getVisibleSources(component, filters);
-  const embeddedVulnerabilities = getScopedEmbeddedVulnerabilities(component, visibleSources);
   const relatedVulnerabilities = getScopedRelatedVulnerabilities(snapshot, component, visibleSources);
-
-  const graphSeverities = snapshot.relationships.allSeveritiesByComponent.get(component.key) ?? [];
+  const activeRelatedVulnerabilities = filterActiveRelatedVulnerabilities(relatedVulnerabilities);
+  const embeddedVulnerabilities = getScopedEmbeddedVulnerabilities(component, visibleSources, relatedVulnerabilities);
   const embeddedSeverities: SeverityRating[] = embeddedVulnerabilities
     .map((vulnerability) => {
       if (vulnerability.normalizedSeverity?.rating) {
@@ -225,26 +237,27 @@ const toDisplayEntry = (
       return display as SeverityRating | undefined;
     })
     .filter((r): r is SeverityRating => r !== undefined);
-  const allSeverities = Array.from(new Set([...graphSeverities, ...embeddedSeverities]));
+  const relatedSeverities: SeverityRating[] = activeRelatedVulnerabilities
+    .map((vulnerability) => resolveDisplaySeverity(vulnerability.normalizedSeverity, vulnerability.severity))
+    .filter((severity): severity is SeverityRating => severity !== undefined && severity !== 'unknown');
+  const allSeverities = Array.from(new Set([...relatedSeverities, ...embeddedSeverities]));
   const highestSeverity = getEffectiveHighestSeverity(
-    [
-      ...embeddedVulnerabilities.map((vulnerability) =>
-        resolveDisplaySeverity(vulnerability.normalizedSeverity, vulnerability.severity)),
-      visibleSources.length === component.sources.length ? component.highestSeverity : undefined
-    ],
-    relatedVulnerabilities
+    embeddedVulnerabilities.map((vulnerability) =>
+      resolveDisplaySeverity(vulnerability.normalizedSeverity, vulnerability.severity)),
+    activeRelatedVulnerabilities
   );
 
   return {
     allSeverities,
+    activeRelatedVulnerabilities,
     component,
     highestSeverity,
-    hydrationState: resolveComponentHydrationState(highestSeverity, relatedVulnerabilities),
+    hydrationState: resolveComponentHydrationState(highestSeverity, activeRelatedVulnerabilities),
     relatedVulnerabilities,
     visibleSources,
     vulnerabilityCount: getUniqueVulnerabilityCount(
       embeddedVulnerabilities.map((vulnerability) => vulnerability.id),
-      relatedVulnerabilities
+      activeRelatedVulnerabilities
     )
   };
 };
