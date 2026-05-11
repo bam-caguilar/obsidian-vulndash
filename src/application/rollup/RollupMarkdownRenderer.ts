@@ -293,6 +293,8 @@ export class RollupMarkdownRenderer {
 
   private mapFinding(finding: RollupFinding): DailyRollupFindingInput {
     const matchedComponents = this.extractMatchedComponents(finding);
+    const sbomTitles = this.extractSbomTitles(finding);
+    const { componentVersion, recommendedUpgradeVersion } = this.extractVersionAndUpgrade(finding);
 
     return {
       vulnerability: finding.vulnerability,
@@ -309,7 +311,69 @@ export class RollupMarkdownRenderer {
         .filter((project) => project.target.length > 0),
       triageState: formatTriageStateLabel(finding.triageState),
       rationale: this.buildFindingRationale(finding),
-      ...(matchedComponents ? { matchedComponents } : {})
+      ...(matchedComponents ? { matchedComponents } : {}),
+      ...(sbomTitles.length > 0 ? { sbomTitles } : {}),
+      ...(componentVersion ? { componentVersion } : {}),
+      ...(recommendedUpgradeVersion ? { recommendedUpgradeVersion } : {})
+    };
+  }
+
+  private extractSbomTitles(finding: RollupFinding): string[] {
+    const seen = new Set<string>();
+    const titles: string[] = [];
+
+    for (const project of finding.affectedProjects) {
+      for (const label of project.sourceSbomLabels) {
+        const trimmed = label.trim();
+        if (trimmed && !seen.has(trimmed)) {
+          seen.add(trimmed);
+          titles.push(trimmed);
+        }
+      }
+    }
+
+    for (const sbom of finding.unmappedSboms) {
+      const trimmed = sbom.sbomLabel.trim();
+      if (trimmed && !seen.has(trimmed)) {
+        seen.add(trimmed);
+        titles.push(trimmed);
+      }
+    }
+
+    return titles;
+  }
+
+  private extractVersionAndUpgrade(finding: RollupFinding): {
+    componentVersion?: string;
+    recommendedUpgradeVersion?: string;
+  } {
+    const packages = finding.vulnerability.metadata?.affectedPackages ?? [];
+    if (packages.length === 0) {
+      return {};
+    }
+
+    const versions = [...new Set(
+      packages.map((pkg) => pkg.version?.trim()).filter((v): v is string => Boolean(v))
+    )];
+
+    const patchedVersions = [...new Set(
+      packages.flatMap((pkg) => {
+        const candidates: string[] = [];
+        if (pkg.firstPatchedVersion?.trim()) {
+          candidates.push(pkg.firstPatchedVersion.trim());
+        }
+        for (const patch of pkg.knownPatches ?? []) {
+          if (patch.version?.trim()) {
+            candidates.push(patch.version.trim());
+          }
+        }
+        return candidates;
+      })
+    )];
+
+    return {
+      ...(versions.length > 0 ? { componentVersion: versions.join(', ') } : {}),
+      ...(patchedVersions.length > 0 ? { recommendedUpgradeVersion: patchedVersions.join(', ') } : {})
     };
   }
 

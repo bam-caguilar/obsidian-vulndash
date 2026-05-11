@@ -13,6 +13,9 @@ export interface DailyRollupFindingInput {
     version?: string;
     ecosystem?: string;
   }>;
+  sbomTitles?: string[];
+  componentVersion?: string;
+  recommendedUpgradeVersion?: string;
   triageState?: string;
   rationale?: string;
 }
@@ -109,7 +112,7 @@ export class DailyRollupMarkdownComposer {
 
     builder.h2('Findings Overview');
     builder.table({
-      headers: ['Severity', 'Identifier', 'Title', 'Projects', 'Components'],
+      headers: ['Severity', 'Identifier', 'Title', 'SBOM', 'Components', 'Version', 'Recommended Upgrade'],
       rows: sortedFindings.map((finding) => [
         finding.vulnerability.severity,
         this.support.formatVulnerabilityLink(
@@ -117,8 +120,10 @@ export class DailyRollupMarkdownComposer {
           this.support.getPrimaryIdentifier(finding.vulnerability)
         ),
         finding.vulnerability.title,
-        this.formatProjectSummary(finding.affectedProjects),
-        this.formatComponentSummary(finding.matchedComponents)
+        this.formatSbomTitleSummary(finding.sbomTitles),
+        this.formatComponentSummary(finding.matchedComponents),
+        finding.componentVersion ?? '-',
+        finding.recommendedUpgradeVersion ?? '-'
       ])
     });
 
@@ -315,6 +320,14 @@ export class DailyRollupMarkdownComposer {
 
         return component.ecosystem ? `${wikiLink} (${component.ecosystem})` : wikiLink;
       });
+  }
+
+  private formatSbomTitleSummary(sbomTitles?: string[]): string {
+    if (!sbomTitles?.length) {
+      return '-';
+    }
+
+    return sbomTitles.join(', ');
   }
 
   private formatProjectSummary(
