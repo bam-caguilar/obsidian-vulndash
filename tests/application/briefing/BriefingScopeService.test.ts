@@ -159,3 +159,133 @@ test('BriefingScopeService filters findings by single sbom using unmapped sbom r
     ['CVE-2026-3333']
   );
 });
+
+test('BriefingScopeService trims out-of-scope affectedProjects from a finding that spans two projects', () => {
+  const service = new BriefingScopeService();
+  const resolved = service.resolveScope({
+    projectId: 'project::portal-web',
+    type: 'single-project'
+  }, projects, sboms);
+
+  // Finding is linked to both Portal Web and Identity API via separate SBOMs.
+  const crossProjectFinding = createFinding({
+    key: 'NVD:CVE-2026-9999',
+    affectedProjects: [
+      {
+        displayName: 'Portal Web',
+        notePath: 'Projects/Portal.md',
+        sourceSbomIds: ['sbom-portal'],
+        sourceSbomLabels: ['portal-web.cdx.json'],
+        status: 'linked'
+      },
+      {
+        displayName: 'Identity API',
+        notePath: 'Projects/Identity.md',
+        sourceSbomIds: ['sbom-identity'],
+        sourceSbomLabels: ['identity-api.spdx.json'],
+        status: 'linked'
+      }
+    ],
+    vulnerability: {
+      affectedProducts: [],
+      cvssScore: 8.0,
+      hydrationState: 'complete',
+      id: 'CVE-2026-9999',
+      publishedAt: '2026-05-04T00:00:00.000Z',
+      references: [],
+      severity: 'HIGH',
+      source: 'NVD',
+      summary: 'Summary',
+      title: 'Cross-project finding',
+      updatedAt: '2026-05-04T00:00:00.000Z'
+    }
+  });
+
+  const result = service.filterFindings([crossProjectFinding], resolved, sboms);
+
+  assert.equal(result.length, 1, 'finding is included because it affects the scoped project');
+  const [trimmedFinding] = result;
+  assert.ok(trimmedFinding);
+  assert.equal(trimmedFinding.affectedProjects.length, 1, 'only the in-scope project is retained');
+  const [trimmedProject] = trimmedFinding.affectedProjects;
+  assert.ok(trimmedProject);
+  assert.equal(trimmedProject.displayName, 'Portal Web');
+  assert.deepEqual(trimmedProject.sourceSbomIds, ['sbom-portal']);
+  assert.deepEqual(trimmedProject.sourceSbomLabels, ['portal-web.cdx.json']);
+});
+
+test('BriefingScopeService excludes findings whose only project is out of scope', () => {
+  const service = new BriefingScopeService();
+  const resolved = service.resolveScope({
+    projectId: 'project::portal-web',
+    type: 'single-project'
+  }, projects, sboms);
+
+  const outOfScopeFinding = createFinding({
+    key: 'NVD:CVE-2026-8888',
+    affectedProjects: [{
+      displayName: 'Identity API',
+      notePath: 'Projects/Identity.md',
+      sourceSbomIds: ['sbom-identity'],
+      sourceSbomLabels: ['identity-api.spdx.json'],
+      status: 'linked'
+    }],
+    vulnerability: {
+      affectedProducts: [],
+      cvssScore: 6.0,
+      hydrationState: 'complete',
+      id: 'CVE-2026-8888',
+      publishedAt: '2026-05-04T00:00:00.000Z',
+      references: [],
+      severity: 'MEDIUM',
+      source: 'NVD',
+      summary: 'Summary',
+      title: 'Identity-only finding',
+      updatedAt: '2026-05-04T00:00:00.000Z'
+    }
+  });
+
+  const result = service.filterFindings([outOfScopeFinding], resolved, sboms);
+
+  assert.equal(result.length, 0, 'out-of-scope finding is excluded');
+});
+
+test('BriefingScopeService trims out-of-scope unmappedSboms from a cross-project finding', () => {
+  const service = new BriefingScopeService();
+  const resolved = service.resolveScope({
+    projectId: 'project::portal-web',
+    type: 'single-project'
+  }, projects, sboms);
+
+  const finding = createFinding({
+    key: 'NVD:CVE-2026-7777',
+    affectedProjects: [],
+    unmappedSboms: [
+      { sbomId: 'sbom-portal', sbomLabel: 'portal-web.cdx.json' },
+      { sbomId: 'sbom-identity', sbomLabel: 'identity-api.spdx.json' }
+    ],
+    vulnerability: {
+      affectedProducts: [],
+      cvssScore: 5.0,
+      hydrationState: 'complete',
+      id: 'CVE-2026-7777',
+      publishedAt: '2026-05-04T00:00:00.000Z',
+      references: [],
+      severity: 'MEDIUM',
+      source: 'NVD',
+      summary: 'Summary',
+      title: 'Unmapped cross-project finding',
+      updatedAt: '2026-05-04T00:00:00.000Z'
+    }
+  });
+
+  const result = service.filterFindings([finding], resolved, sboms);
+
+  assert.equal(result.length, 1, 'finding is included because it has an in-scope unmapped SBOM');
+  const [trimmedFinding] = result;
+  assert.ok(trimmedFinding);
+  assert.equal(trimmedFinding.unmappedSboms.length, 1, 'only the in-scope unmapped SBOM is retained');
+  const [trimmedSbom] = trimmedFinding.unmappedSboms;
+  assert.ok(trimmedSbom);
+  assert.equal(trimmedSbom.sbomId, 'sbom-portal');
+});

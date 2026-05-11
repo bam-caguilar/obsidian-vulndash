@@ -124,31 +124,51 @@ export class BriefingScopeService {
     const projectIdsInScope = new Set(resolvedScope.projectIds);
     const sbomIdsInScope = new Set(resolvedScope.sbomIds);
 
-    return findings.filter((finding) => {
-      const matchedSbomIds = new Set<string>();
-
-      for (const project of finding.affectedProjects) {
-        for (const sbomId of project.sourceSbomIds) {
-          matchedSbomIds.add(sbomId);
-        }
-      }
-
-      for (const sbom of finding.unmappedSboms) {
-        matchedSbomIds.add(sbom.sbomId);
-      }
-
+    const isSbomInScope = (sbomId: string): boolean => {
       if (resolvedScope.scope.type === 'single-sbom') {
-        return sbomIdsInScope.size > 0 && Array.from(matchedSbomIds).some((sbomId) => sbomIdsInScope.has(sbomId));
+        return sbomIdsInScope.has(sbomId);
+      }
+      const sbom = sbomsById.get(sbomId);
+      return Boolean(sbom && projectIdsInScope.has(sbom.projectId));
+    };
+
+    const result: RollupFinding[] = [];
+
+    for (const finding of findings) {
+      const hasScopedProject = finding.affectedProjects.some((p) =>
+        p.sourceSbomIds.some(isSbomInScope)
+      );
+      const hasScopedUnmapped = finding.unmappedSboms.some((s) => isSbomInScope(s.sbomId));
+
+      if (!hasScopedProject && !hasScopedUnmapped) {
+        continue;
       }
 
-      if (projectIdsInScope.size === 0) {
-        return false;
-      }
+      // Trim affectedProjects to only entries whose SBOMs are in scope, and strip
+      // out-of-scope SBOM references within each remaining project entry.
+      const trimmedProjects = finding.affectedProjects
+        .map((project) => {
+          const inScopeSbomIds = project.sourceSbomIds.filter(isSbomInScope);
+          const inScopeSbomLabels = [...new Set(
+            inScopeSbomIds.map((id) => sbomsById.get(id)?.label ?? id)
+          )].sort((left, right) => left.localeCompare(right));
+          return {
+            ...project,
+            sourceSbomIds: inScopeSbomIds,
+            sourceSbomLabels: inScopeSbomLabels
+          };
+        })
+        .filter((project) => project.sourceSbomIds.length > 0);
 
-      return Array.from(matchedSbomIds).some((sbomId) => {
-        const sbom = sbomsById.get(sbomId);
-        return Boolean(sbom && projectIdsInScope.has(sbom.projectId));
+      const trimmedUnmapped = finding.unmappedSboms.filter((s) => isSbomInScope(s.sbomId));
+
+      result.push({
+        ...finding,
+        affectedProjects: trimmedProjects,
+        unmappedSboms: trimmedUnmapped
       });
-    });
+    }
+
+    return result;
   }
 }
