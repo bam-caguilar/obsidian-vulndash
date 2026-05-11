@@ -12,6 +12,13 @@ import {
 } from './ComponentInventoryStore';
 import type { ComponentDetailsRenderer } from './ComponentDetailPanel';
 import { VirtualizedComponentTable } from './VirtualizedComponentTable';
+import {
+  DEFAULT_COMPONENT_TABLE_SORT_STATE,
+  applyColumnSort,
+  type ComponentTableSortState,
+  type SortableComponentColumn
+} from './ComponentTableSortState';
+import { sortComponentEntries } from './ComponentTableSorting';
 
 export interface ComponentInventoryViewCallbacks {
   detailsRenderer: ComponentDetailsRenderer;
@@ -53,6 +60,7 @@ export class ComponentInventoryView {
   private resultsHostEl: HTMLDivElement | null = null;
   private rootEl: HTMLDivElement | null = null;
   private selectedComponentKey: string | null = null;
+  private sortState: ComponentTableSortState = DEFAULT_COMPONENT_TABLE_SORT_STATE;
   private stateHostEl: HTMLDivElement | null = null;
   private summaryHostEl: HTMLDivElement | null = null;
   private tableHostEl: HTMLDivElement | null = null;
@@ -62,35 +70,42 @@ export class ComponentInventoryView {
   public constructor(
     private readonly callbacks: ComponentInventoryViewCallbacks
   ) {
-    this.tableRenderer = new VirtualizedComponentTable({
-      detailsRenderer: this.callbacks.detailsRenderer,
-      isExpanded: (componentKey) => this.expandedKeys.has(componentKey),
-      isSelected: (componentKey) => this.selectedComponentKey === componentKey,
-      onDisable: (component) => void this.handlePreferenceAction(component.key, 'disable'),
-      onEnable: (component) => void this.handlePreferenceAction(component.key, 'enable'),
-      onFollow: (component) => void this.handlePreferenceAction(component.key, 'follow'),
-      onSelectComponent: (componentKey) => {
-        if (this.selectedComponentKey === componentKey) {
-          return;
-        }
+    this.tableRenderer = new VirtualizedComponentTable(
+      {
+        detailsRenderer: this.callbacks.detailsRenderer,
+        isExpanded: (componentKey) => this.expandedKeys.has(componentKey),
+        isSelected: (componentKey) => this.selectedComponentKey === componentKey,
+        onDisable: (component) => void this.handlePreferenceAction(component.key, 'disable'),
+        onEnable: (component) => void this.handlePreferenceAction(component.key, 'enable'),
+        onFollow: (component) => void this.handlePreferenceAction(component.key, 'follow'),
+        onSelectComponent: (componentKey) => {
+          if (this.selectedComponentKey === componentKey) {
+            return;
+          }
 
-        this.selectedComponentKey = componentKey;
-        this.renderResults();
+          this.selectedComponentKey = componentKey;
+          this.renderResults();
+        },
+        onToggleExpanded: (key, expanded) => {
+          this.selectedComponentKey = key;
+          if (expanded) {
+            this.expandedKeys.add(key);
+          } else {
+            this.expandedKeys.delete(key);
+          }
+          this.renderResults();
+        },
+        onUnfollow: (component) => void this.handlePreferenceAction(component.key, 'unfollow'),
+        ...(this.callbacks.onOpenNote !== undefined
+          ? { onOpenNote: this.callbacks.onOpenNote }
+          : {})
       },
-      onToggleExpanded: (key, expanded) => {
-        this.selectedComponentKey = key;
-        if (expanded) {
-          this.expandedKeys.add(key);
-        } else {
-          this.expandedKeys.delete(key);
-        }
+      (column: SortableComponentColumn) => {
+        this.sortState = applyColumnSort(this.sortState, column);
+        this.tableRenderer.updateSortState(this.sortState);
         this.renderResults();
-      },
-      onUnfollow: (component) => void this.handlePreferenceAction(component.key, 'unfollow'),
-      ...(this.callbacks.onOpenNote !== undefined
-        ? { onOpenNote: this.callbacks.onOpenNote }
-        : {})
-    });
+      }
+    );
   }
 
   public mount(containerEl: HTMLElement): void {
@@ -328,7 +343,7 @@ export class ComponentInventoryView {
     const transientState = this.getTransientStateCard();
     this.renderStateCard(transientState);
     this.renderIssues(inventory.issues.length > 0 ? inventory : null);
-    this.renderTable(derivedState.components);
+    this.renderTable(sortComponentEntries(derivedState.components, this.sortState));
     this.renderPurlDiagnostics(derivedState.purlMatches);
   }
 

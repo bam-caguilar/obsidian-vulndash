@@ -1577,3 +1577,45 @@ Hide the syncing of components message
 .vulndash-component-issues-region {
   display: none;
 }
+
+/* ==========================================================================
+   14. COMPONENT TABLE COLUMN SORTING
+   ========================================================================== */
+
+.vulndash-col-sort-btn {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  width: 100%;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.vulndash-col-sort-btn:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.vulndash-col-sort-btn:hover {
+  color: var(--text-normal);
+}
+
+.vulndash-col-sort-btn.is-sort-active {
+  color: var(--interactive-accent);
+}
+
+.vulndash-sort-indicator {
+  font-size: 0.7em;
+  line-height: 1;
+  flex-shrink: 0;
+  color: var(--interactive-accent);
+}
+
+.vulndash-col-header--actions {
+  cursor: default;
+}
+
