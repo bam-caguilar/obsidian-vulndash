@@ -195,7 +195,7 @@ export class DailyRollupMarkdownComposer {
 
       builder.h3('Vulnerabilities');
       builder.table({
-        headers: ['Severity', 'Identifier', 'Title', 'Components'],
+        headers: ['Severity', 'Identifier', 'Title', 'SBOM', 'Components', 'Version', 'Recommended Upgrade'],
         rows: section.findings.map((finding) => [
           finding.vulnerability.severity,
           this.support.formatVulnerabilityLink(
@@ -203,7 +203,10 @@ export class DailyRollupMarkdownComposer {
             this.support.getPrimaryIdentifier(finding.vulnerability)
           ),
           finding.vulnerability.title,
-          this.formatComponentSummary(finding.matchedComponents)
+          this.formatSbomTitleSummary(finding.sbomTitles),
+          this.formatComponentSummary(finding.matchedComponents),
+          finding.componentVersion ?? '-',
+          finding.recommendedUpgradeVersion ?? '-'
         ])
       });
 

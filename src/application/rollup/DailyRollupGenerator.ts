@@ -14,8 +14,10 @@ import {
   type RenderDailyRollupInput,
   type RenderedDailyRollup
 } from './RollupMarkdownRenderer';
+import { RollupFindingProjector } from './RollupFindingProjector';
 import type { RollupTriageSnapshot } from './SelectRollupFindings';
 import { SelectRollupFindings } from './SelectRollupFindings';
+import type { ComponentRelationshipGraph } from '../sbom/types';
 
 export interface DailyRollupWriter {
   write(input: {
@@ -42,13 +44,15 @@ export class DailyRollupGenerator {
     private readonly renderer: RollupMarkdownRenderer,
     private readonly writer: DailyRollupWriter,
     private readonly asyncTaskCoordinator = new AsyncTaskCoordinator(),
-    private readonly briefingScopeService = new BriefingScopeService()
+    private readonly briefingScopeService = new BriefingScopeService(),
+    private readonly findingProjector = new RollupFindingProjector()
   ) {}
 
   public async execute(input: {
     readonly affectedProjectsByVulnerabilityRef: ReadonlyMap<string, AffectedProjectResolution>;
     readonly date: string;
     readonly projects: readonly Project[];
+    readonly relationshipGraph: ComponentRelationshipGraph;
     readonly settings: DailyRollupSettings;
     readonly sboms: readonly ImportedSbomConfig[];
     readonly scope: BriefingScope;
@@ -75,9 +79,10 @@ export class DailyRollupGenerator {
       resolvedScope,
       input.sboms
     );
+    const projectedFindings = this.findingProjector.project(findings, input.relationshipGraph);
     const document = await this.renderDocument({
       date: input.date,
-      findings,
+      findings: projectedFindings,
       scope: resolvedScope
     });
     const written = await this.writer.write({
@@ -89,7 +94,7 @@ export class DailyRollupGenerator {
     return {
       content: written.content,
       date: input.date,
-      findingsCount: findings.length,
+      findingsCount: projectedFindings.length,
       path: written.path
     };
   }

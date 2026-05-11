@@ -1,8 +1,11 @@
-import type { RollupFinding } from '../../domain/rollup/RollupFinding';
 import { UNASSIGNED_PROJECT_NAME } from '../../domain/project/ProjectName';
 import { formatTriageStateLabel } from '../../domain/triage/TriageState';
 import { getSeverityRank, resolveSeverity } from '../../domain/value-objects/Severity';
 import type { ResolvedBriefingScope } from '../briefing/BriefingScopeService';
+import type {
+  RollupFindingProjection,
+  RollupMatchedComponentSummary
+} from './RollupFindingProjector';
 import {
   DailyRollupMarkdownComposer,
   type DailyRollupFindingInput,
@@ -26,7 +29,7 @@ export interface RenderedDailyRollup {
 
 export interface RenderDailyRollupInput {
   readonly date: string;
-  readonly findings: readonly RollupFinding[];
+  readonly findings: readonly RollupFindingProjection[];
   readonly scope: ResolvedBriefingScope;
 }
 
@@ -55,7 +58,11 @@ const safeInline = (value: string | null | undefined, fallback = 'Not provided')
 
 interface ProjectSectionAccumulator {
   criticalCount: number;
-  findings: RollupFinding[];
+  findingsByKey: Map<string, {
+    finding: RollupFindingProjection;
+    sbomIds: Set<string>;
+    sbomLabels: Set<string>;
+  }>;
   highCount: number;
   lowCount: number;
   mediumCount: number;
@@ -69,12 +76,12 @@ interface ProjectSectionAccumulator {
   }>;
 }
 
-const normalizeComponentName = (component: { name: string; version?: string; ecosystem?: string }): string =>
-  [
-    component.name.trim(),
-    component.version?.trim(),
-    component.ecosystem?.trim()
-  ].filter(Boolean).join(' ');
+const uniqueSorted = (values: readonly string[]): string[] =>
+  Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
+    .sort((left, right) => left.localeCompare(right));
+
+const normalizeComponentName = (component: { name: string; version?: string }): string =>
+  component.version?.trim() ? `${component.name.trim()} ${component.version.trim()}` : component.name.trim();
 
 const compareProjectSections = (
   left: ProjectSectionAccumulator,
@@ -122,7 +129,7 @@ export class RollupMarkdownRenderer {
 
   private mapToComposerInput(
     date: string,
-    findings: readonly RollupFinding[],
+    findings: readonly RollupFindingProjection[],
     scope?: ResolvedBriefingScope
   ): DailyRollupMarkdownComposerInput {
     const sortedFindings = this.sortFindings(findings);
@@ -149,7 +156,7 @@ export class RollupMarkdownRenderer {
     };
   }
 
-  private buildProjectSections(findings: readonly RollupFinding[]): ProjectSectionAccumulator[] {
+  private buildProjectSections(findings: readonly RollupFindingProjection[]): ProjectSectionAccumulator[] {
     const sections = new Map<string, ProjectSectionAccumulator>();
 
     const ensureSection = (
@@ -164,7 +171,7 @@ export class RollupMarkdownRenderer {
 
       const created: ProjectSectionAccumulator = {
         criticalCount: 0,
-        findings: [],
+        findingsByKey: new Map(),
         highCount: 0,
         lowCount: 0,
         mediumCount: 0,
@@ -180,7 +187,12 @@ export class RollupMarkdownRenderer {
     for (const finding of findings) {
       for (const project of finding.affectedProjects) {
         const section = ensureSection(project.displayName, project.notePath);
-        this.addFindingToProjectSection(section, finding, project.sourceSbomLabels);
+        this.addFindingToProjectSection(
+          section,
+          finding,
+          project.sourceSbomIds,
+          project.sourceSbomLabels
+        );
       }
 
       if (finding.unmappedSboms.length > 0) {
@@ -188,6 +200,7 @@ export class RollupMarkdownRenderer {
         this.addFindingToProjectSection(
           section,
           finding,
+          finding.unmappedSboms.map((sbom) => sbom.sbomId),
           finding.unmappedSboms.map((sbom) => sbom.sbomLabel)
         );
       }
@@ -198,19 +211,35 @@ export class RollupMarkdownRenderer {
 
   private addFindingToProjectSection(
     section: ProjectSectionAccumulator,
-    finding: RollupFinding,
+    finding: RollupFindingProjection,
+    sbomIds: readonly string[],
     sbomLabels: readonly string[]
   ): void {
-    if (!section.findings.some((candidate) => candidate.key === finding.key)) {
-      section.findings.push(finding);
+    const existingFinding = section.findingsByKey.get(finding.key);
+    if (!existingFinding) {
+      section.findingsByKey.set(finding.key, {
+        finding,
+        sbomIds: new Set<string>(),
+        sbomLabels: new Set<string>()
+      });
       this.incrementSeverityCount(section, finding);
+    }
+
+    const findingEntry = section.findingsByKey.get(finding.key);
+    if (!findingEntry) {
+      return;
+    }
+
+    for (const sbomId of sbomIds.map((value) => value.trim()).filter(Boolean)) {
+      findingEntry.sbomIds.add(sbomId);
     }
 
     for (const sbomLabel of sbomLabels.map((value) => value.trim()).filter(Boolean)) {
       section.sbomLabels.add(sbomLabel);
+      findingEntry.sbomLabels.add(sbomLabel);
     }
 
-    for (const component of this.extractMatchedComponents(finding) ?? []) {
+    for (const component of this.filterMatchedComponents(finding.matchedComponents, sbomIds)) {
       const componentName = normalizeComponentName(component);
       if (!componentName) {
         continue;
@@ -229,7 +258,7 @@ export class RollupMarkdownRenderer {
     }
   }
 
-  private incrementSeverityCount(section: ProjectSectionAccumulator, finding: RollupFinding): void {
+  private incrementSeverityCount(section: ProjectSectionAccumulator, finding: RollupFindingProjection): void {
     switch (resolveSeverity(finding.vulnerability.severity)) {
       case 'CRITICAL':
         section.criticalCount += 1;
@@ -259,13 +288,14 @@ export class RollupMarkdownRenderer {
       projectName: section.projectName,
       ...(section.notePath ? { projectTarget: section.notePath } : {}),
       sbomCount: section.sbomLabels.size,
-      vulnerabilityCount: section.findings.length
+      vulnerabilityCount: section.findingsByKey.size
     }));
   }
 
   private mapProjectSection(
     section: ProjectSectionAccumulator
   ): DailyRollupProjectSectionInput {
+    const findingEntries = Array.from(section.findingsByKey.values());
     const topComponents = Array.from(section.topComponents.values())
       .map((component) => ({
         componentName: component.componentName,
@@ -279,7 +309,14 @@ export class RollupMarkdownRenderer {
 
     return {
       criticalCount: section.criticalCount,
-      findings: this.sortFindings(section.findings).map((finding) => this.mapFinding(finding)),
+      findings: this.sortFindings(findingEntries.map((entry) => entry.finding)).map((finding) => {
+        const scopedEntry = section.findingsByKey.get(finding.key);
+        return this.mapFinding(
+          finding,
+          uniqueSorted(Array.from(scopedEntry?.sbomIds ?? [])),
+          uniqueSorted(Array.from(scopedEntry?.sbomLabels ?? []))
+        );
+      }),
       highCount: section.highCount,
       lowCount: section.lowCount,
       mediumCount: section.mediumCount,
@@ -287,18 +324,29 @@ export class RollupMarkdownRenderer {
       ...(section.notePath ? { projectTarget: section.notePath } : {}),
       sbomLabels: Array.from(section.sbomLabels).sort((left, right) => left.localeCompare(right)),
       topComponents,
-      vulnerabilityCount: section.findings.length
+      vulnerabilityCount: findingEntries.length
     };
   }
 
-  private mapFinding(finding: RollupFinding): DailyRollupFindingInput {
-    const matchedComponents = this.extractMatchedComponents(finding);
-    const sbomTitles = this.extractSbomTitles(finding);
-    const { componentVersion, recommendedUpgradeVersion } = this.extractVersionAndUpgrade(finding);
+  private mapFinding(
+    finding: RollupFindingProjection,
+    scopedSbomIds: readonly string[] = [],
+    scopedSbomLabels: readonly string[] = []
+  ): DailyRollupFindingInput {
+    const allowedSbomIds = scopedSbomIds.length > 0
+      ? new Set(scopedSbomIds.map((value) => value.trim()).filter(Boolean))
+      : null;
+    const matchedComponents = this.filterMatchedComponents(finding.matchedComponents, scopedSbomIds);
+    const componentVersions = uniqueSorted(matchedComponents
+      .flatMap((component) => component.version ? [component.version] : []));
+    const recommendedUpgradeVersions = uniqueSorted(matchedComponents
+      .flatMap((component) => [...component.recommendedUpgradeVersions]));
+    const sbomTitles = scopedSbomLabels.length > 0 ? uniqueSorted(scopedSbomLabels) : [...finding.sbomTitles];
 
     return {
       vulnerability: finding.vulnerability,
       affectedProjects: finding.affectedProjects
+        .filter((project) => !allowedSbomIds || project.sourceSbomIds.some((sbomId) => allowedSbomIds.has(sbomId)))
         .map((project) => {
           const target = project.notePath.trim();
           const displayName = project.displayName?.trim();
@@ -311,110 +359,33 @@ export class RollupMarkdownRenderer {
         .filter((project) => project.target.length > 0),
       triageState: formatTriageStateLabel(finding.triageState),
       rationale: this.buildFindingRationale(finding),
-      ...(matchedComponents ? { matchedComponents } : {}),
+      ...(matchedComponents.length > 0 ? {
+        matchedComponents: matchedComponents.map((component) => ({
+          name: component.name,
+          ...(component.version ? { version: component.version } : {})
+        }))
+      } : {}),
       ...(sbomTitles.length > 0 ? { sbomTitles } : {}),
-      ...(componentVersion ? { componentVersion } : {}),
-      ...(recommendedUpgradeVersion ? { recommendedUpgradeVersion } : {})
+      ...(componentVersions.length > 0 ? { componentVersion: componentVersions.join(', ') } : {}),
+      ...(recommendedUpgradeVersions.length > 0
+        ? { recommendedUpgradeVersion: recommendedUpgradeVersions.join(', ') }
+        : {})
     };
   }
 
-  private extractSbomTitles(finding: RollupFinding): string[] {
-    const seen = new Set<string>();
-    const titles: string[] = [];
-
-    for (const project of finding.affectedProjects) {
-      for (const label of project.sourceSbomLabels) {
-        const trimmed = label.trim();
-        if (trimmed && !seen.has(trimmed)) {
-          seen.add(trimmed);
-          titles.push(trimmed);
-        }
-      }
+  private filterMatchedComponents(
+    components: readonly RollupMatchedComponentSummary[],
+    scopedSbomIds: readonly string[]
+  ): RollupMatchedComponentSummary[] {
+    if (scopedSbomIds.length === 0) {
+      return [...components];
     }
 
-    for (const sbom of finding.unmappedSboms) {
-      const trimmed = sbom.sbomLabel.trim();
-      if (trimmed && !seen.has(trimmed)) {
-        seen.add(trimmed);
-        titles.push(trimmed);
-      }
-    }
-
-    return titles;
+    const allowedSbomIds = new Set(scopedSbomIds.map((value) => value.trim()).filter(Boolean));
+    return components.filter((component) => Boolean(component.sbomId && allowedSbomIds.has(component.sbomId)));
   }
 
-  private extractVersionAndUpgrade(finding: RollupFinding): {
-    componentVersion?: string;
-    recommendedUpgradeVersion?: string;
-  } {
-    const packages = finding.vulnerability.metadata?.affectedPackages ?? [];
-    if (packages.length === 0) {
-      return {};
-    }
-
-    const versions = [...new Set(
-      packages.map((pkg) => pkg.version?.trim()).filter((v): v is string => Boolean(v))
-    )];
-
-    const patchedVersions = [...new Set(
-      packages.flatMap((pkg) => {
-        const candidates: string[] = [];
-        if (pkg.firstPatchedVersion?.trim()) {
-          candidates.push(pkg.firstPatchedVersion.trim());
-        }
-        for (const patch of pkg.knownPatches ?? []) {
-          if (patch.version?.trim()) {
-            candidates.push(patch.version.trim());
-          }
-        }
-        return candidates;
-      })
-    )];
-
-    return {
-      ...(versions.length > 0 ? { componentVersion: versions.join(', ') } : {}),
-      ...(patchedVersions.length > 0 ? { recommendedUpgradeVersion: patchedVersions.join(', ') } : {})
-    };
-  }
-
-  private extractMatchedComponents(
-    finding: RollupFinding
-  ): DailyRollupFindingInput['matchedComponents'] {
-    const affectedPackages = finding.vulnerability.metadata?.affectedPackages ?? [];
-    if (affectedPackages.length === 0) {
-      return undefined;
-    }
-
-    const seen = new Set<string>();
-    const components: NonNullable<DailyRollupFindingInput['matchedComponents']> = [];
-
-    for (const pkg of affectedPackages) {
-      const name = pkg.name?.trim();
-      if (!name) {
-        continue;
-      }
-
-      const version = pkg.version?.trim();
-      const ecosystem = pkg.ecosystem?.trim();
-      const key = `${name}::${version ?? ''}::${ecosystem ?? ''}`;
-
-      if (seen.has(key)) {
-        continue;
-      }
-
-      seen.add(key);
-
-      components.push({
-        name,
-        ...(version ? { version } : {}),
-        ...(ecosystem ? { ecosystem } : {})
-      });
-    }
-
-    return components.length > 0 ? components : undefined;
-  }
-
-  private buildSummary(findings: readonly RollupFinding[], scope?: ResolvedBriefingScope): string {
+  private buildSummary(findings: readonly RollupFindingProjection[], scope?: ResolvedBriefingScope): string {
     if (findings.length === 0) {
       if (scope && scope.scope.type !== 'all-projects') {
         return `No findings matched the daily briefing policy for ${scope.displayLabel}.`;
@@ -463,7 +434,7 @@ export class RollupMarkdownRenderer {
     return asSentence(summaryParts.join('; '));
   }
 
-  private buildFindingRationale(finding: RollupFinding): string {
+  private buildFindingRationale(finding: RollupFindingProjection): string {
     const parts: string[] = [
       `Included because severity is ${safeInline(finding.vulnerability.severity, 'Unknown')}`,
       `and triage state is ${formatTriageStateLabel(finding.triageState)}`
@@ -512,7 +483,7 @@ export class RollupMarkdownRenderer {
     return stripped.trim();
   }
 
-  private sortFindings(findings: readonly RollupFinding[]): RollupFinding[] {
+  private sortFindings(findings: readonly RollupFindingProjection[]): RollupFindingProjection[] {
     return [...findings].sort((left, right) => {
       const severityDiff = getSeverityRank(right.vulnerability.severity)
         - getSeverityRank(left.vulnerability.severity);

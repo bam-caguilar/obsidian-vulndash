@@ -9,6 +9,8 @@ import type { DailyRollupSettings, ImportedSbomConfig } from '../../../src/appli
 import type { SelectRollupFindings } from '../../../src/application/rollup/SelectRollupFindings';
 import type { RollupMarkdownRenderer } from '../../../src/application/rollup/RollupMarkdownRenderer';
 import { DailyRollupNoteWriter, type DailyRollupVaultAdapter } from '../../../src/infrastructure/obsidian/DailyRollupNoteWriter';
+import type { ComponentRelationshipGraph } from '../../../src/application/sbom/types';
+import type { RollupFindingProjection } from '../../../src/application/rollup/RollupFindingProjector';
 
 const settings: DailyRollupSettings = {
   autoGenerateOnFirstSyncOfDay: false,
@@ -85,6 +87,14 @@ const createFinding = (overrides: Partial<RollupFinding> = {}): RollupFinding =>
   ...overrides
 });
 
+const emptyRelationshipGraph: ComponentRelationshipGraph = {
+  allSeveritiesByComponent: new Map(),
+  componentsByVulnerability: new Map(),
+  relationships: [],
+  vulnerabilitiesByComponent: new Map(),
+  vulnerabilitiesByOccurrence: new Map()
+};
+
 test('DailyRollupGenerator orchestrates selection, rendering, and writing', async () => {
   const findings: RollupFinding[] = [];
   const calls: string[] = [];
@@ -103,10 +113,10 @@ test('DailyRollupGenerator orchestrates selection, rendering, and writing', asyn
     title: '# VulnDash Briefing 2026-04-18'
   };
   const renderer = {
-    render: (input: { readonly date: string; readonly findings: readonly RollupFinding[]; readonly scope: { readonly displayLabel: string; }; }) => {
+    render: (input: { readonly date: string; readonly findings: readonly RollupFindingProjection[]; readonly scope: { readonly displayLabel: string; }; }) => {
       calls.push('render-fallback');
       assert.equal(input.date, '2026-04-18');
-      assert.equal(input.findings, findings);
+      assert.equal(input.findings.length, findings.length);
       assert.equal(input.scope.displayLabel, 'All Projects');
       return rendered;
     }
@@ -125,10 +135,10 @@ test('DailyRollupGenerator orchestrates selection, rendering, and writing', asyn
     }
   };
   const asyncTaskCoordinator = {
-    execute: async (_taskKind: 'render-daily-rollup', payload: { readonly date: string; readonly findings: readonly RollupFinding[]; }) => {
+    execute: async (_taskKind: 'render-daily-rollup', payload: { readonly date: string; readonly findings: readonly RollupFindingProjection[]; }) => {
       calls.push('render');
       assert.equal(payload.date, '2026-04-18');
-      assert.equal(payload.findings, findings);
+      assert.equal(payload.findings.length, findings.length);
       return {
         document: rendered
       };
@@ -139,6 +149,7 @@ test('DailyRollupGenerator orchestrates selection, rendering, and writing', asyn
     affectedProjectsByVulnerabilityRef: new Map(),
     date: '2026-04-18',
     projects: [],
+    relationshipGraph: emptyRelationshipGraph,
     scope: ALL_PROJECTS_BRIEFING_SCOPE,
     settings,
     sboms: [],
@@ -283,7 +294,8 @@ test('DailyRollupGenerator filters findings for a single-project briefing before
   const selector = {
     execute: () => findings
   } as unknown as SelectRollupFindings;
-  let renderedFindings: readonly RollupFinding[] = [];
+  let renderedFindings: readonly RollupFindingProjection[] = [];
+  let renderedMatchedComponentCount = 0;
   let renderedScopeLabel = '';
   const rendered: RenderedDailyRollup = {
     analystNotesHeading: '## Analyst Notes',
@@ -293,8 +305,9 @@ test('DailyRollupGenerator filters findings for a single-project briefing before
     title: '# VulnDash Briefing 2026-04-18 - Portal Web'
   };
   const renderer = {
-    render: (input: { readonly findings: readonly RollupFinding[]; readonly scope: { readonly displayLabel: string; }; }) => {
+    render: (input: { readonly findings: readonly RollupFindingProjection[]; readonly scope: { readonly displayLabel: string; }; }) => {
       renderedFindings = input.findings;
+      renderedMatchedComponentCount = input.findings[0]?.matchedComponents.length ?? 0;
       renderedScopeLabel = input.scope.displayLabel;
       return rendered;
     }
@@ -308,13 +321,14 @@ test('DailyRollupGenerator filters findings for a single-project briefing before
   };
 
   await new DailyRollupGenerator(selector, renderer, writer, {
-    execute: async (_taskKind: 'render-daily-rollup', payload: { readonly findings: readonly RollupFinding[]; readonly scope: { readonly displayLabel: string; }; }) => ({
+    execute: async (_taskKind: 'render-daily-rollup', payload: { readonly findings: readonly RollupFindingProjection[]; readonly scope: { readonly displayLabel: string; }; }) => ({
       document: renderer.render(payload as never)
     })
   } as never).execute({
     affectedProjectsByVulnerabilityRef: new Map(),
     date: '2026-04-18',
     projects,
+    relationshipGraph: emptyRelationshipGraph,
     scope: {
       projectId: 'project::portal-web',
       type: 'single-project'
@@ -327,6 +341,7 @@ test('DailyRollupGenerator filters findings for a single-project briefing before
 
   assert.equal(renderedScopeLabel, 'Portal Web');
   assert.deepEqual(renderedFindings.map((finding) => finding.vulnerability.id), ['CVE-2026-4000']);
+  assert.equal(renderedMatchedComponentCount, 0);
 });
 
 test('DailyRollupGenerator filters findings for a multi-project briefing before rendering', async () => {
@@ -380,7 +395,7 @@ test('DailyRollupGenerator filters findings for a multi-project briefing before 
   const selector = {
     execute: () => findings
   } as unknown as SelectRollupFindings;
-  let renderedFindings: readonly RollupFinding[] = [];
+  let renderedFindings: readonly RollupFindingProjection[] = [];
   let renderedScopeLabel = '';
   const rendered: RenderedDailyRollup = {
     analystNotesHeading: '## Analyst Notes',
@@ -390,7 +405,7 @@ test('DailyRollupGenerator filters findings for a multi-project briefing before 
     title: '# VulnDash Briefing 2026-04-18 - 2 Projects (Identity API, Portal Web)'
   };
   const renderer = {
-    render: (input: { readonly findings: readonly RollupFinding[]; readonly scope: { readonly displayLabel: string; }; }) => {
+    render: (input: { readonly findings: readonly RollupFindingProjection[]; readonly scope: { readonly displayLabel: string; }; }) => {
       renderedFindings = input.findings;
       renderedScopeLabel = input.scope.displayLabel;
       return rendered;
@@ -405,13 +420,14 @@ test('DailyRollupGenerator filters findings for a multi-project briefing before 
   };
 
   await new DailyRollupGenerator(selector, renderer, writer, {
-    execute: async (_taskKind: 'render-daily-rollup', payload: { readonly findings: readonly RollupFinding[]; readonly scope: { readonly displayLabel: string; }; }) => ({
+    execute: async (_taskKind: 'render-daily-rollup', payload: { readonly findings: readonly RollupFindingProjection[]; readonly scope: { readonly displayLabel: string; }; }) => ({
       document: renderer.render(payload as never)
     })
   } as never).execute({
     affectedProjectsByVulnerabilityRef: new Map(),
     date: '2026-04-18',
     projects,
+    relationshipGraph: emptyRelationshipGraph,
     scope: {
       projectIds: ['project::identity-api', 'project::portal-web'],
       type: 'multiple-projects'

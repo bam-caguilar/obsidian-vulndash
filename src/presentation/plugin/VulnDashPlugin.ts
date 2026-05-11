@@ -953,6 +953,13 @@ export default class VulnDashPlugin extends Plugin {
     }
 
     const workspace = await this.buildCorrelationWorkspace();
+    return this.resolveAffectedProjectMapFromWorkspace(vulnerabilities, workspace);
+  }
+
+  private async resolveAffectedProjectMapFromWorkspace(
+    vulnerabilities: readonly Vulnerability[],
+    workspace: Awaited<ReturnType<VulnDashPlugin['buildCorrelationWorkspace']>>
+  ): Promise<Map<string, AffectedProjectResolution>> {
     return this.getAppModule().resolveAffectedProjects.execute({
       componentIndex: workspace.componentIndex,
       relationships: workspace.snapshot.relationships,
@@ -1174,11 +1181,16 @@ export default class VulnDashPlugin extends Plugin {
     try {
       const date = this.getCurrentDateStamp();
       const triageByKey = await this.loadVisibleTriageState(this.cachedVulnerabilities);
-      const affectedProjectsByVulnerabilityRef = await this.resolveAffectedProjectMap(this.cachedVulnerabilities);
+      const workspace = await this.buildCorrelationWorkspace();
+      const affectedProjectsByVulnerabilityRef = await this.resolveAffectedProjectMapFromWorkspace(
+        this.cachedVulnerabilities,
+        workspace
+      );
       const result = await this.getAppModule().dailyRollupGenerator.execute({
         affectedProjectsByVulnerabilityRef,
         date,
         projects: this.settings.projects,
+        relationshipGraph: workspace.snapshot.relationships,
         scope: options.scope ?? ALL_PROJECTS_BRIEFING_SCOPE,
         settings: this.settings.dailyRollup,
         sboms: this.settings.sboms,
