@@ -104,6 +104,22 @@ const getTableShell = (root: HTMLElement): HTMLElement => {
 const getMainRows = (root: HTMLElement): HTMLElement[] =>
   Array.from(root.querySelectorAll('.vulndash-component-table-row')) as HTMLElement[];
 
+const getRowComponentNames = (root: HTMLElement): string[] =>
+  getMainRows(root)
+    .map((row) => row.querySelector('.vulndash-component-name-stack'))
+    .filter((stack): stack is HTMLElement => stack instanceof HTMLElement)
+    .map((stack) => {
+      const label = stack.querySelector('strong');
+      return label?.textContent ?? '';
+    });
+
+const getSortButton = (root: HTMLElement, label: string): HTMLElement => {
+  const buttons = Array.from(root.querySelectorAll('.vulndash-col-sort-btn')) as HTMLElement[];
+  const match = buttons.find((button) => button.textContent.includes(label));
+  assert.ok(match);
+  return match;
+};
+
 test('ComponentInventoryView keeps the same table host during normal refresh', async () => {
   const root = createRoot() as unknown as HTMLElement;
   let nextSnapshot = createSnapshot([createComponent('purl:pkg:npm/widget@1.0.0')]);
@@ -180,4 +196,51 @@ test('deriveComponentInventoryState filtered empty state can retain the table sh
 
   assert.equal(derived.hasActiveFilters, true);
   assert.equal(derived.components.length, 0);
+});
+
+test('ComponentInventoryView applies header sort state to row order and visible indicators', async () => {
+  const root = createRoot() as unknown as HTMLElement;
+  const snapshot = createSnapshot([
+    createComponent('purl:pkg:npm/zeta@2.0.0', {
+      name: 'Zeta',
+      version: '2.0.0'
+    }),
+    createComponent('purl:pkg:npm/alpha@1.0.0', {
+      name: 'Alpha',
+      version: '1.0.0'
+    })
+  ]);
+
+  const view = new ComponentInventoryView({
+    detailsRenderer: {
+      renderDetails: async (): Promise<void> => undefined
+    } as never,
+    loadSnapshot: async () => snapshot,
+    onDisableComponent: async () => undefined,
+    onEnableComponent: async () => undefined,
+    onFollowComponent: async () => undefined,
+    onUnfollowComponent: async () => undefined
+  });
+
+  view.mount(root);
+  await view.setActive(true);
+
+  assert.deepEqual(getRowComponentNames(root), ['Zeta', 'Alpha']);
+
+  const sortButton = getSortButton(root, 'Component');
+  sortButton.click();
+
+  assert.deepEqual(getRowComponentNames(root), ['Alpha', 'Zeta']);
+  assert.equal((sortButton as unknown as { attributes: Map<string, string> }).attributes.get('aria-sort'), 'ascending');
+
+  const ascendingIndicator = sortButton.querySelector('.vulndash-sort-indicator');
+  assert.equal(ascendingIndicator?.textContent, '^');
+
+  sortButton.click();
+
+  assert.deepEqual(getRowComponentNames(root), ['Zeta', 'Alpha']);
+  assert.equal((sortButton as unknown as { attributes: Map<string, string> }).attributes.get('aria-sort'), 'descending');
+
+  const descendingIndicator = sortButton.querySelector('.vulndash-sort-indicator');
+  assert.equal(descendingIndicator?.textContent, 'v');
 });

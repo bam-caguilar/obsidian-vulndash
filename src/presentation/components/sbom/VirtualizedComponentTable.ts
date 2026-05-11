@@ -5,8 +5,7 @@ import { COMPONENT_TABLE_COLUMNS } from './ComponentTableColumns';
 import {
   DEFAULT_COMPONENT_TABLE_SORT_STATE,
   applyColumnSort,
-  type ComponentTableSortState,
-  type SortableComponentColumn
+  type ComponentTableSortState
 } from './ComponentTableSortState';
 
 export class VirtualizedComponentTable {
@@ -18,12 +17,11 @@ export class VirtualizedComponentTable {
 
   constructor(
     callbacks: ComponentRowRendererCallbacks,
-    private readonly onSortChange: (column: SortableComponentColumn) => void
+    private readonly onSortChange: (sortState: ComponentTableSortState) => void
   ) {
     this.container = document.createElement('div');
     this.container.className = 'vulndash-virtual-table-container vulndash-component-virtual-table-root vulndash-card-shell';
 
-    // Inject Sticky Header directly into the shared scrolling container
     this.headerEl = document.createElement('div');
     this.headerEl.className = 'vulndash-virtual-header vulndash-component-header-row';
     this.headerEl.style.position = 'sticky';
@@ -53,11 +51,11 @@ export class VirtualizedComponentTable {
         btn.appendChild(labelSpan);
         btn.appendChild(indicatorSpan);
 
-        const sortId = column.sortId;
         btn.addEventListener('click', () => {
-          this.sortState = applyColumnSort(this.sortState, sortId);
+          const nextSortState = applyColumnSort(this.sortState, column.sortId);
+          this.sortState = nextSortState;
           this.refreshHeaderCells();
-          this.onSortChange(sortId);
+          this.onSortChange(nextSortState);
         });
 
         col.appendChild(btn);
@@ -74,9 +72,8 @@ export class VirtualizedComponentTable {
     this.container.appendChild(this.headerEl);
 
     const renderer = new ComponentRowRenderer(callbacks);
-    const heightProvider = (entry: ComponentInventoryDisplayEntry) => {
-      return callbacks.isExpanded(entry.component.key) ? 400 : 48;
-    };
+    const heightProvider = (entry: ComponentInventoryDisplayEntry) =>
+      callbacks.isExpanded(entry.component.key) ? 400 : 48;
 
     this.table = new VirtualTable<ComponentInventoryDisplayEntry>(this.container, heightProvider, renderer);
   }
@@ -120,10 +117,9 @@ export class VirtualizedComponentTable {
       const indicator = btn.querySelector('.vulndash-sort-indicator');
       if (indicator) {
         indicator.textContent = isActive
-          ? (this.sortState.direction === 'asc' ? '▲' : '▼')
+          ? (this.sortState.direction === 'asc' ? '^' : 'v')
           : '';
       }
     }
   }
 }
-

@@ -14,9 +14,7 @@ import type { ComponentDetailsRenderer } from './ComponentDetailPanel';
 import { VirtualizedComponentTable } from './VirtualizedComponentTable';
 import {
   DEFAULT_COMPONENT_TABLE_SORT_STATE,
-  applyColumnSort,
-  type ComponentTableSortState,
-  type SortableComponentColumn
+  type ComponentTableSortState
 } from './ComponentTableSortState';
 import { sortComponentEntries } from './ComponentTableSorting';
 
@@ -100,8 +98,8 @@ export class ComponentInventoryView {
           ? { onOpenNote: this.callbacks.onOpenNote }
           : {})
       },
-      (column: SortableComponentColumn) => {
-        this.sortState = applyColumnSort(this.sortState, column);
+      (sortState: ComponentTableSortState) => {
+        this.sortState = sortState;
         this.tableRenderer.updateSortState(this.sortState);
         this.renderResults();
       }
