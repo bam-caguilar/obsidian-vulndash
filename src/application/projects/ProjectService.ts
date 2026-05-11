@@ -86,18 +86,6 @@ export const normalizeProjects = (
   return normalized;
 };
 
-/**
- * Converts an array of Projects into a lookup dictionary keyed by Project ID.
- */
-export const projectsById = (
-  projects: readonly Project[]
-): Record<string, Project> => {
-  return projects.reduce((acc, project) => {
-    acc[project.id] = project;
-    return acc;
-  }, {} as Record<string, Project>);
-};
-
 export const assignProjectToSbom = (
   sbom: ImportedSbomConfig,
   projects: readonly Project[],
@@ -142,20 +130,6 @@ export const assignProjectToSbom = (
       projectNameSnapshot: requestedProjectName || project.name
     }
   };
-};
-
-/**
- * Converts an array of SBOM configurations into a lookup dictionary keyed by SBOM ID.
- */
-export const sbomById = (
-  sboms: readonly ImportedSbomConfig[]
-): Record<string, ImportedSbomConfig> => {
-  return sboms.reduce((acc, sbom) => {
-    // Note: Use the appropriate unique identifier property for your SBOM object
-    // (e.g., sbomId, sourcePath, etc. depending on your types)
-    acc[sbom.id] = sbom;
-    return acc;
-  }, {} as Record<string, ImportedSbomConfig>);
 };
 
 export const reconcileSbomProjects = (

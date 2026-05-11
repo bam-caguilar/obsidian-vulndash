@@ -25,7 +25,6 @@ const createVulnerability = (overrides: Partial<Vulnerability> = {}): Vulnerabil
 const repository: SbomProjectMappingRepository = {
   deleteBySbomId: async () => undefined,
   getBySbomId: async () => null,
-  getMappingsBySbomIds: async () => [],
   list: async () => [
     createSbomProjectMapping('sbom-1', createProjectNoteReference('Projects/Portal.md', 'Portal Platform')),
     createSbomProjectMapping('sbom-2', createProjectNoteReference('Projects/Portal.md', 'Portal Platform')),

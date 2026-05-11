@@ -33,13 +33,19 @@ const uniqueSorted = (values: readonly string[]): string[] =>
   Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort(compareText);
 
 export class BriefingScopeService {
+  private static buildSbomsIndex(
+    sboms: readonly ImportedSbomConfig[]
+  ): Map<string, ImportedSbomConfig> {
+    return new Map(sboms.map((sbom) => [sbom.id, sbom] as const));
+  }
+
   public resolveScope(
     scope: BriefingScope,
     projects: readonly Project[],
     sboms: readonly ImportedSbomConfig[]
   ): ResolvedBriefingScope {
-    const projectsById = new Map(projects.map((project) => [project.id, project] as const)); 
-    const sbomsById = new Map(sboms.map((sbom) => [sbom.id, sbom] as const));
+    const projectsById = new Map(projects.map((project) => [project.id, project] as const));
+    const sbomsById = BriefingScopeService.buildSbomsIndex(sboms);
 
     switch (scope.type) {
       case 'single-project': {
@@ -120,7 +126,7 @@ export class BriefingScopeService {
       return [...findings];
     }
 
-    const sbomsById = new Map(sboms.map((sbom) => [sbom.id, sbom] as const));
+    const sbomsById = BriefingScopeService.buildSbomsIndex(sboms);
     const projectIdsInScope = new Set(resolvedScope.projectIds);
     const sbomIdsInScope = new Set(resolvedScope.sbomIds);
 
