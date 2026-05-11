@@ -4,7 +4,7 @@ import { ResolveAffectedProjects, type ProjectNoteLookup } from '../../../src/ap
 import type { ComponentRelationshipGraph } from '../../../src/application/sbom/types';
 import { createProjectNoteReference } from '../../../src/domain/correlation/ProjectNoteReference';
 import type { SbomProjectMappingRepository } from '../../../src/domain/correlation/SbomProjectMappingRepository';
-import { createSbomProjectMapping } from '../../../src/domain/correlation/SbomProjectMapping';
+import { createSbomProjectMapping, SbomProjectMapping } from '../../../src/domain/correlation/SbomProjectMapping';
 import type { Vulnerability } from '../../../src/domain/entities/Vulnerability';
 
 const createVulnerability = (overrides: Partial<Vulnerability> = {}): Vulnerability => ({
@@ -25,13 +25,14 @@ const createVulnerability = (overrides: Partial<Vulnerability> = {}): Vulnerabil
 const repository: SbomProjectMappingRepository = {
   deleteBySbomId: async () => undefined,
   getBySbomId: async () => null,
+  getMappingsBySbomIds: async () => [],
   list: async () => [
     createSbomProjectMapping('sbom-1', createProjectNoteReference('Projects/Portal.md', 'Portal Platform')),
     createSbomProjectMapping('sbom-2', createProjectNoteReference('Projects/Portal.md', 'Portal Platform')),
     createSbomProjectMapping('sbom-4', createProjectNoteReference('Projects/Missing.md', 'Legacy Platform'))
   ],
   replaceNotePath: async () => 0,
-  save: async () => undefined
+  save: async () => undefined,
 };
 
 const lookup: ProjectNoteLookup = {

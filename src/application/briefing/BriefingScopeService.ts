@@ -38,7 +38,7 @@ export class BriefingScopeService {
     projects: readonly Project[],
     sboms: readonly ImportedSbomConfig[]
   ): ResolvedBriefingScope {
-    const projectsById = new Map(projects.map((project) => [project.id, project] as const));
+    const projectsById = new Map(projects.map((project) => [project.id, project] as const)); 
     const sbomsById = new Map(sboms.map((sbom) => [sbom.id, sbom] as const));
 
     switch (scope.type) {

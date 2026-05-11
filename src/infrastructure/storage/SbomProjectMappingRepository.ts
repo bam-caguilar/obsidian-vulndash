@@ -25,6 +25,16 @@ export class SbomProjectMappingRepository implements SbomProjectMappingRepositor
     });
   }
 
+  public async getMappingsBySbomIds(sbomIds: readonly string[]): Promise<readonly SbomProjectMapping[]> {
+    const sbomIdSet = new Set(sbomIds);
+    return this.getSboms()
+      .filter((sbom) => sbomIdSet.has(sbom.id) && sbom.linkedProjectNotePath)
+      .map((sbom) => createSbomProjectMapping(
+        sbom.id,
+        createProjectNoteReference(sbom.linkedProjectNotePath!, sbom.linkedProjectDisplayName)
+      ));
+  }
+
   public async getBySbomId(sbomId: string): Promise<SbomProjectMapping | null> {
     const sbom = this.getSboms().find((entry) => entry.id === sbomId);
     if (!sbom || !sbom.linkedProjectNotePath) {
